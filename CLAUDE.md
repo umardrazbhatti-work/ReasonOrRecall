@@ -91,8 +91,11 @@ ror/                     # the package — all real logic lives here
   metrics.py             # number normalization, Exact Match, exec accuracy [IMPLEMENTED]
   faithfulness.py        # primary (PoT) + post-hoc proxy faithfulness      [IMPLEMENTED]
   experiment.py          # orchestration: plan -> train? -> infer -> eval -> log [IMPLEMENTED shell]
-  data.py                # dataset loaders, preprocessing, target formats   [TODO — contracts given]
-  models.py              # student (QLoRA) + teacher (~32B/70B) loading      [TODO — contracts given]
+  paths.py               # repo/data locations; $ROR_DATA_DIR                [IMPLEMENTED]
+  data.py                # loaders + linearize/normalize [IMPLEMENTED]; format_target, build_prompt [TODO]
+  preprocess.py          # pinned raw benchmarks -> verified Example JSONL    [IMPLEMENTED]
+  kaggle.py              # Kaggle helpers: secrets, data dir, registry restore [IMPLEMENTED]
+  models.py              # resolve_model + ≥70B guard [IMPLEMENTED]; loading   [TODO — contracts given]
   training.py            # QLoRA SFT loop                                    [TODO — contracts given]
   inference.py           # generation + self-consistency                     [TODO — contracts given]
 configs/
@@ -103,12 +106,21 @@ configs/
 scripts/
   run_suite.py           # expand a suite, skip finished, plan then run     [IMPLEMENTED]
   run_experiment.py      # run one experiment by config path                [IMPLEMENTED]
+  prepare_data.py        # download + preprocess benchmarks -> dist/ror-data.zip [IMPLEMENTED]
   build_clean_set.py     # build the contamination-controlled eval set      [TODO — contract given]
   aggregate_results.py   # results.jsonl -> ablation table + frontier       [IMPLEMENTED]
   status.py              # registry dashboard                               [IMPLEMENTED]
-tests/                   # pytest; framework modules covered
+notebooks/
+  kaggle_runner.ipynb    # the Kaggle entry point: clone -> install -> data -> restore -> test -> plan -> run
+tests/                   # pytest; framework, data and Kaggle helpers covered
 runs/                    # gitignored: per-run logs, adapters, results.jsonl
+data/, dist/             # gitignored: processed data and the Kaggle data zip
 ```
+
+Code lives on GitHub (umardrazbhatti-work/ReasonOrRecall) and runs on Kaggle
+through `notebooks/kaggle_runner.ipynb`. On Kaggle the data comes from the
+attached `ror-data` dataset (`$ROR_DATA_DIR`), secrets from Kaggle Secrets, and
+the registry persists by attaching the previous notebook version's output.
 
 `[IMPLEMENTED]` = working, do not rewrite without reason. `[TODO]` = your job;
 the file contains a precise docstring contract and raises `NotImplementedError`.

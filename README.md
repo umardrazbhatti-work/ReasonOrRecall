@@ -19,12 +19,37 @@ Three requirements drove the design:
 3. **Plan, then execute** — the suite runner prints a plan (and has `--dry-run`);
    each run logs its plan before doing anything.
 
-## Setup
+## Workflow: code on GitHub, compute on Kaggle
+
+1. Code changes are pushed to this repo.
+2. `notebooks/kaggle_runner.ipynb` is uploaded to Kaggle once. Each run clones
+   the repo at `GIT_REF`, installs it, and calls the scripts below. Setup steps
+   (T4 x2, dataset, `HF_TOKEN` secret, resuming) are in its first cell.
+3. The data is a Kaggle dataset built from `dist/ror-data.zip` (see Data).
+4. Each committed notebook version saves `/kaggle/working/runs`. Attach it as an
+   input to the next version to keep the registry, so finished experiments are
+   never repeated.
+
+## Data
+
+```bash
+python scripts/prepare_data.py   # -> data/ (gitignored) + dist/ror-data.zip
+```
+
+This downloads FinQA, ConvFinQA and TAT-QA from pinned upstream commits (MIT /
+MIT / CC BY 4.0) and converts them to one `Example` schema in
+`processed/<dataset>/<split>.jsonl`. Every gold program is converted to Python,
+kept only if it re-executes to the gold answer, and spot-checked in the sandbox.
+The zip also contains the raw files, a manifest (sha256s, counts, code commit)
+and a dataset card. Upload it to Kaggle as a **private** dataset named `ror-data`.
+Loaders read `$ROR_DATA_DIR` (default `data/`).
+
+## Setup (local)
 
 ```bash
 pip install -e .            # makes `ror` importable
 pip install -r requirements.txt   # ML stack (in the Kaggle image)
-pytest -q                   # framework tests should pass immediately
+pytest -q                   # tests should pass immediately
 ```
 
 ## Run
@@ -33,8 +58,9 @@ pytest -q                   # framework tests should pass immediately
 # see what the full Phase-1 sweep would do (no work done)
 python scripts/run_suite.py configs/suite_phase1.yaml --dry-run
 
-# start narrow: one arm, one model, end-to-end
-python scripts/run_suite.py configs/suite_phase1.yaml --only A5 --model qwen2.5-3b
+# start narrow: one arm, one model, one split, one seed, end-to-end
+python scripts/run_suite.py configs/suite_phase1.yaml --only A5 --model qwen2.5-3b \
+    --split standard --seed 0
 
 # a single experiment from its config
 python scripts/run_experiment.py configs/experiments/A5_qlora_answer.yaml
@@ -63,8 +89,12 @@ the "large" model is ~32B on the dual-T4.
 
 ## What's implemented vs. TODO
 
-Implemented (framework): `config`, `registry`, `results`, `logging_utils`,
-`utils`, `sandbox`, `metrics`, `faithfulness`, `experiment`, and all `scripts/`.
-TODO (ML, contracts in the docstrings): `ror/data.py`, `ror/models.py`,
-`ror/training.py`, `ror/inference.py`, and `scripts/build_clean_set.py`. Follow
-`IMPLEMENTATION_PLAN.md`.
+Implemented: the framework (`config`, `registry`, `results`, `logging_utils`,
+`utils`, `sandbox`, `metrics`, `faithfulness`, `experiment`, `paths`, `kaggle`),
+the data layer (`data` loaders + `preprocess`), the model registry and ≥70B
+guard in `models`, the Kaggle notebook, and all `scripts/` except the clean set.
+TODO (contracts in the docstrings): `data.format_target` / `data.build_prompt`,
+model loading in `models`, `training`, `inference`, and
+`scripts/build_clean_set.py`. Follow `IMPLEMENTATION_PLAN.md`. Until those
+exist, a run stops at the first stub and returns to *pending* without using up
+an attempt.

@@ -17,15 +17,31 @@ depend on them. Update this file as you go; it is the shared plan.
 - [x] `scripts/run_suite.py`, `run_experiment.py`, `aggregate_results.py`, `status.py`
 - [x] Tests for registry / sandbox / metrics
 - [ ] `pip install -e .`; run `pytest -q`; confirm all framework tests pass in Kaggle
+      (passes locally, 76 tests; `notebooks/kaggle_runner.ipynb` runs it on Kaggle)
+- [x] Code review of the scaffold: stub errors no longer burn registry attempts;
+      results carry the full config; config identity/coercion fixes; metrics
+      number parsing; sandbox blocks file/network/process access (proposal 5.4);
+      git commit recorded from any cwd; aggregation dedupes re-runs and never
+      mixes datasets/variants; suite filters `--split/--seed/--runs-dir`
+- [x] Kaggle entry point `notebooks/kaggle_runner.ipynb` + `ror/kaggle.py`
+      (clone at a ref, secrets, attached data, registry restore across versions)
 
 ## Phase 1 — Jobs 1–3 (free, on Kaggle)
 
 ### Data (`ror/data.py`)
-- [ ] `load_dataset("finqa", split)` → list[Example] from Hugging Face
-      (`ibm-research/finqa`); confirm the license first
-- [ ] `linearize_table` + `normalize_numbers` preprocessing (helpers stubbed)
+- [x] `load_dataset("finqa", split)` → list[Example]. The HF repo `ibm-research/finqa`
+      is only a loading script (unsupported by `datasets` ≥4), so the source is the
+      original GitHub release pinned to a commit. License: MIT (FinQA, ConvFinQA),
+      CC BY 4.0 (TAT-QA)
+- [x] `scripts/prepare_data.py` → `dist/ror-data.zip` (Kaggle dataset `ror-data`):
+      all gold programs converted to Python and execution-verified (FinQA and
+      ConvFinQA 100%, TAT-QA arithmetic ~99%), sandbox spot-checked
+- [x] `linearize_table` + `normalize_numbers` preprocessing
 - [ ] `format_target(example, supervision)` for answer-only / CoT / PoT-gold
-- [ ] Wire ConvFinQA + TAT-QA loaders (used in v2; keep interface identical)
+      (`gold_program` is already verified Python, so PoT-gold is nearly free)
+- [ ] `build_prompt` (ConvFinQA history is in `meta.history`)
+- [x] Wire ConvFinQA + TAT-QA loaders (used in v2; keep interface identical)
+      (TAT-QA span / multi-span scoring still needs v2 metrics)
 
 ### Contamination-controlled set (`scripts/build_clean_set.py`)
 - [ ] Pull post-cutoff 10-K/10-Q filings from SEC EDGAR (record model cutoffs)
@@ -38,7 +54,8 @@ depend on them. Update this file as you go; it is the shared plan.
 ### Models (`ror/models.py`)
 - [ ] `load_student(name)` — 4-bit NF4 base + LoRA adapters (Qwen2.5-3B first)
 - [ ] `load_teacher(name)` — Phase 1: ~32B on T4×2 (device_map); Phase 2: ≥70B
-      via API/vLLM. Guard against loading ≥70B on free hardware.
+      via API/vLLM. (The ≥70B phase-1 guard and `resolve_model` are implemented
+      and tested; loading is TODO.)
 
 ### Training (`ror/training.py`) — Job 1
 - [ ] QLoRA SFT loop (trl `SFTTrainer`), resumable checkpoints to `runs/<id>/`
@@ -58,6 +75,21 @@ depend on them. Update this file as you go; it is the shared plan.
 - [ ] `scripts/aggregate_results.py` → ablation table + contamination gap +
       accuracy-per-compute frontier from `runs/results.jsonl`
 - [ ] Sanity pass: numbers reasonable, no missing arms, gaps computed
+
+## Known issues to settle (before the runs they affect)
+
+- **Percent scale (before A1–A4):** FinQA gold `exe_ans` stores "14%" as 0.14464,
+  but `metrics.normalize_number("14%")` is 14.0, so prompted arms answering in
+  percent are scored wrong. Decide the rule (e.g. accept x or x/100 for
+  percentage questions) in `ror.metrics` before evaluating A1–A4. A5–A8 learn
+  the decimal form and are unaffected.
+- **`max_seq_len` (before A5):** 54% of FinQA prompts exceed 1024 Qwen tokens
+  (p95 ≈ 1,630, p99 ≈ 2,270). Proposed: 2048, drop the ~1.5% longer training
+  items, never truncate eval prompts.
+- **Compute budget (before the sweep):** 3 epochs at 2048 ≈ 20M training tokens
+  per A5 run; measure T4 throughput with a smoke run first, then fix epochs.
+- **Session kills cost attempts:** a Kaggle session killed mid-run counts as an
+  attempt (default `max_attempts: 2`). Keep each experiment within one session.
 
 ## Phase 2 — Job 4 (paid, only after Phase 1 is validated)
 
