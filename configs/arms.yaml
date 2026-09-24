@@ -1,0 +1,43 @@
+# The eight experiment arms (proposal 5.6). `role` gates which models an arm runs
+# with (student vs large). `supervision` drives training-target format;
+# `inference` drives how the model is prompted/decoded.
+A1:
+  role: student
+  supervision: none
+  inference: zeroshot
+  notes: "small-model floor"
+A2:
+  role: student
+  supervision: none
+  inference: fewshot
+  notes: "small-model prompting ceiling"
+A3:
+  role: large
+  supervision: none
+  inference: zeroshot
+  notes: "large-general baseline (floor)"
+A4:
+  role: large
+  supervision: none
+  inference: fewshot
+  notes: "large-general baseline (main)"
+A5:
+  role: student
+  supervision: answer
+  inference: greedy
+  notes: "QLoRA, answer-only — effect of fine-tuning"
+A6:
+  role: student
+  supervision: cot
+  inference: greedy
+  notes: "QLoRA + chain-of-thought"
+A7:
+  role: student
+  supervision: pot_gold
+  inference: greedy
+  notes: "QLoRA + program-of-thoughts (gold)"
+A8:
+  role: student
+  supervision: pot_distilled
+  inference: greedy
+  notes: "QLoRA + distilled PoT (teacher, verified) — reproduces arXiv:2408.12337"

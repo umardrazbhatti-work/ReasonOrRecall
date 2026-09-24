@@ -1,0 +1,8 @@
+# A7 — QLoRA + program-of-thoughts (gold programs)
+arm: A7
+role: student
+model: qwen2.5-3b
+supervision: pot_gold
+inference: greedy
+split: standard
+epochs: 3

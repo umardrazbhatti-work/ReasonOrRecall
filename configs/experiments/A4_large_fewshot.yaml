@@ -1,0 +1,7 @@
+# A4 — large baseline, few-shot (main large-general baseline)
+arm: A4
+role: large
+model: qwen2.5-32b
+supervision: none
+inference: fewshot
+split: standard

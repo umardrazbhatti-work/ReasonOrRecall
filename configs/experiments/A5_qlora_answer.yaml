@@ -1,0 +1,8 @@
+# A5 — QLoRA, answer-only (effect of fine-tuning). Start here.
+arm: A5
+role: student
+model: qwen2.5-3b
+supervision: answer
+inference: greedy
+split: standard
+epochs: 3

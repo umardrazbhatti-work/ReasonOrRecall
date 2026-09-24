@@ -1,0 +1,8 @@
+# A6 — QLoRA + chain-of-thought
+arm: A6
+role: student
+model: qwen2.5-3b
+supervision: cot
+inference: greedy
+split: standard
+epochs: 3

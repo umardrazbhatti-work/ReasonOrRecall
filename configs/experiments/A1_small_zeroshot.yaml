@@ -1,0 +1,7 @@
+# A1 — small model, zero-shot (small-model floor)
+arm: A1
+role: student
+model: qwen2.5-3b
+supervision: none
+inference: zeroshot
+split: standard

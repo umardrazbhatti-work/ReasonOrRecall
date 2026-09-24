@@ -1,0 +1,7 @@
+# A3 — large baseline, zero-shot. Phase-1 large = ~32B on T4x2.
+arm: A3
+role: large
+model: qwen2.5-32b
+supervision: none
+inference: zeroshot
+split: standard

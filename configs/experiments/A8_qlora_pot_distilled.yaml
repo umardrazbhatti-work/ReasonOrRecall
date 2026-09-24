@@ -1,0 +1,10 @@
+# A8 — QLoRA + distilled PoT (teacher-generated, execution-verified).
+# Reproduction of arXiv:2408.12337 as a reference point.
+arm: A8
+role: student
+model: qwen2.5-3b
+supervision: pot_distilled
+inference: greedy
+split: standard
+teacher: qwen2.5-32b
+epochs: 3

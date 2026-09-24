@@ -1,0 +1,7 @@
+# A2 — small model, few-shot (prompting ceiling)
+arm: A2
+role: student
+model: qwen2.5-3b
+supervision: none
+inference: fewshot
+split: standard
