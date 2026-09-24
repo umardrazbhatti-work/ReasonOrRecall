@@ -51,6 +51,7 @@ class RunResult:
     # --- provenance ---
     git_commit: str = ""
     timestamp: float = field(default_factory=time.time)
+    config: dict[str, Any] = field(default_factory=dict)  # full ExperimentConfig
     extra: dict[str, Any] = field(default_factory=dict)
 
     def to_line(self) -> str:
@@ -62,11 +63,11 @@ def append_result(runs_dir: str | Path, result: RunResult) -> Path:
     runs_dir = Path(runs_dir)
     runs_dir.mkdir(parents=True, exist_ok=True)
     master = runs_dir / RESULTS_FILE
-    with open(master, "a") as f:
+    with open(master, "a", encoding="utf-8") as f:
         f.write(result.to_line() + "\n")
     per_run = runs_dir / result.exp_id / "result.json"
     per_run.parent.mkdir(parents=True, exist_ok=True)
-    per_run.write_text(json.dumps(asdict(result), indent=2, sort_keys=True))
+    per_run.write_text(json.dumps(asdict(result), indent=2, sort_keys=True), encoding="utf-8")
     return master
 
 
@@ -75,7 +76,7 @@ def load_results(runs_dir: str | Path) -> list[dict]:
     if not master.exists():
         return []
     rows = []
-    for line in master.read_text().splitlines():
+    for line in master.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if line:
             rows.append(json.loads(line))

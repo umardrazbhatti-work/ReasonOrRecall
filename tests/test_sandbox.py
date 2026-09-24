@@ -33,3 +33,39 @@ def test_timeout():
 def test_string_answer():
     r = run_program("answer = 'increase'")
     assert r.ok and r.value == "increase"
+
+
+def test_stdlib_imports_still_work():
+    r = run_program("import heapq, statistics\n"
+                    "answer = heapq.nsmallest(1, [3, 1])[0] + statistics.mean([1, 3])")
+    assert r.ok and r.value == 3
+
+
+def test_file_write_is_blocked(tmp_path):
+    target = tmp_path / "out.txt"
+    r = run_program(f"open({str(target)!r}, 'w').write('x')\nanswer = 1")
+    assert not r.ok and "sandbox" in r.error
+    assert not target.exists()
+
+
+def test_file_read_outside_python_is_blocked(tmp_path):
+    secret = tmp_path / "secret.txt"
+    secret.write_text("token")
+    r = run_program(f"answer = open({str(secret)!r}).read()")
+    assert not r.ok and "sandbox" in r.error
+
+
+def test_network_and_processes_are_blocked():
+    for code in ("import socket\nsocket.socket()\nanswer = 1",
+                 "import subprocess\nsubprocess.run(['python', '-c', '0'])\nanswer = 1",
+                 "import os\nos.system('echo hi')\nanswer = 1"):
+        r = run_program(code)
+        assert not r.ok, code
+        assert "sandbox" in r.error or "PermissionError" in r.error, code
+
+
+def test_filesystem_mutation_is_blocked(tmp_path):
+    victim = tmp_path / "keep.txt"
+    victim.write_text("x")
+    r = run_program(f"import os\nos.remove({str(victim)!r})\nanswer = 1")
+    assert not r.ok and victim.exists()

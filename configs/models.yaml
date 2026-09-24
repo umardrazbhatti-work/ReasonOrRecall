@@ -1,52 +1,57 @@
 # Model registry. `tier` gates arm compatibility and the ≥70B phase-1 guard:
 #   student -> a small model used for arms A1,A2,A5,A6,A7,A8
 #   large   -> the big baseline/teacher used for arms A3,A4 (and A8's teacher)
-# `hf_id` and exact availability must be confirmed in the Kaggle env; swap in the
-# current best small models at build time (the code is model-agnostic).
-# `cutoff` is the (approximate) training-data cutoff — it defines the
-# contamination boundary for the clean-set builder. VERIFY per model.
+# The code is model-agnostic; swap in newer small models at build time.
+#
+# `cutoff` is the training-data cutoff — it defines the contamination boundary
+# for the clean-set builder. Verified 2026-09-24 against the model cards:
+#   - Llama-3.1: "The pretraining data has a cutoff of December 2023" (card).
+#   - Phi-4-mini: "cutoff date of June 2024 for publicly available data" (card).
+#   - Qwen2.5: no cutoff is published; we use the public release date
+#     (2024-09-19) as a conservative upper bound.
+# All hf_ids below were confirmed to exist on the Hugging Face Hub.
 models:
   qwen2.5-3b:
-    hf_id: Qwen/Qwen2.5-3B-Instruct
+    hf_id: Qwen/Qwen2.5-3B-Instruct     # Qwen Research License (non-commercial)
     family: qwen2.5
     size_b: 3.0
     tier: student
-    cutoff: "2024-09-01"    # verify
+    cutoff: "2024-09-19"    # release date; true cutoff unpublished
 
   qwen2.5-7b:
-    hf_id: Qwen/Qwen2.5-7B-Instruct
+    hf_id: Qwen/Qwen2.5-7B-Instruct     # Apache-2.0
     family: qwen2.5
     size_b: 7.0
     tier: student
-    cutoff: "2024-09-01"    # verify
+    cutoff: "2024-09-19"    # release date; true cutoff unpublished
 
   llama-3.1-8b:
-    hf_id: meta-llama/Llama-3.1-8B-Instruct
+    hf_id: meta-llama/Llama-3.1-8B-Instruct   # gated: needs HF_TOKEN with access
     family: llama3.1
     size_b: 8.0
     tier: student
-    cutoff: "2023-12-01"    # verify
+    cutoff: "2023-12-31"    # "December 2023" per model card
 
   phi-4-mini:
-    hf_id: microsoft/Phi-4-mini-instruct
+    hf_id: microsoft/Phi-4-mini-instruct      # MIT
     family: phi
     size_b: 3.8
     tier: student
-    cutoff: "2024-06-01"    # verify
+    cutoff: "2024-06-30"    # "June 2024" per model card
 
   # --- Phase 1 large model (fits on Kaggle T4x2 in 4-bit) ---
   qwen2.5-32b:
-    hf_id: Qwen/Qwen2.5-32B-Instruct
+    hf_id: Qwen/Qwen2.5-32B-Instruct    # Apache-2.0
     family: qwen2.5
     size_b: 32.0
     tier: large
-    cutoff: "2024-09-01"    # verify
+    cutoff: "2024-09-19"    # release date; true cutoff unpublished
 
   # --- Phase 2 only (Job 4): does NOT fit on free hardware ---
   qwen2.5-72b:
-    hf_id: Qwen/Qwen2.5-72B-Instruct
+    hf_id: Qwen/Qwen2.5-72B-Instruct    # Qwen License
     family: qwen2.5
     size_b: 72.0
     tier: large
     phase2_only: true
-    cutoff: "2024-09-01"    # verify
+    cutoff: "2024-09-19"    # release date; true cutoff unpublished

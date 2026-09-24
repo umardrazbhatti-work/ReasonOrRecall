@@ -26,7 +26,7 @@ def add_run_file_handler(logger: logging.Logger, run_dir: str | Path) -> logging
     """Attach a file handler for one run; returns it so it can be removed after."""
     run_dir = Path(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
-    fh = logging.FileHandler(run_dir / "run.log")
+    fh = logging.FileHandler(run_dir / "run.log", encoding="utf-8")
     fh.setFormatter(logging.Formatter(_FMT, _DATEFMT))
     logger.addHandler(fh)
     return fh

@@ -11,8 +11,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Optional
 
-# Loaded from configs/models.yaml at implementation time; the guardrail below
-# reads size_b from there.
+from .config import load_yaml
+from .paths import repo_root
+
+# The guardrail reads size_b / phase2_only from configs/models.yaml.
 FREE_TIER_MAX_SIZE_B = 34.0  # ~32B fits on T4x2 in 4-bit; 70B does not
 
 
@@ -34,16 +36,37 @@ def load_teacher(name: str, phase: int = 1) -> Any:
     Phase 1: a ~32B open model on the dual-T4 (device_map='auto', 4-bit).
     Phase 2: a ≥70B model via vLLM on a rented GPU, or an API client.
 
-    TODO + GUARDRAIL: resolve size_b from configs/models.yaml and raise
-    ValueError if phase == 1 and size_b > FREE_TIER_MAX_SIZE_B — a 70B model does
-    not fit on free hardware and must wait for Phase 2 (Job 4).
+    GUARDRAIL (implemented): `check_phase_allowed` raises ValueError before any
+    weights are touched if a ≥70B / phase2_only model is requested in phase 1.
+    TODO: the actual loading (Job 3).
     """
-    raise NotImplementedError("implement teacher loading + the ≥70B phase-1 guard")
+    check_phase_allowed(name, phase)
+    raise NotImplementedError("implement teacher loading (Job 3)")
+
+
+def check_phase_allowed(name: str, phase: int) -> None:
+    """Raise ValueError if `name` must not be loaded in `phase`.
+
+    A ≥70B model needs ~40 GB in 4-bit and does not fit on free hardware
+    (Kaggle T4x2 = 32 GB), so it is Phase 2 (Job 4) only.
+    """
+    spec = resolve_model(name)
+    size_b = float(spec.get("size_b") or 0.0)
+    if phase == 1 and (spec.get("phase2_only") or size_b > FREE_TIER_MAX_SIZE_B):
+        raise ValueError(
+            f"{name} ({size_b:g}B) is Phase 2 only: it does not fit on free hardware "
+            f"(limit {FREE_TIER_MAX_SIZE_B:g}B in phase 1). Run it in Job 4 on paid compute."
+        )
 
 
 def resolve_model(name: str, models_yaml: str | Path = "configs/models.yaml") -> dict:
-    """Return the model registry entry (hf_id, family, size_b, cutoff, tier).
-
-    TODO: read configs/models.yaml and return the entry for `name`.
-    """
-    raise NotImplementedError("implement model registry lookup")
+    """Return the model registry entry (hf_id, family, size_b, cutoff, tier), plus
+    its key under `name`. A relative `models_yaml` is resolved against the repo
+    root, so this works from any working directory."""
+    path = Path(models_yaml)
+    if not path.is_absolute():
+        path = repo_root() / path
+    models = load_yaml(path).get("models", {})
+    if name not in models:
+        raise KeyError(f"unknown model {name!r}; known: {', '.join(sorted(models))}")
+    return {"name": name, **models[name]}

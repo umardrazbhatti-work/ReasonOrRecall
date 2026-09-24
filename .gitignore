@@ -1,9 +1,11 @@
 # runs: logs, adapters, results — keep the folder, ignore contents
 runs/*
 !runs/.gitkeep
+runs_*/
 
-# data caches / the built clean set
+# data caches / the built clean set / the Kaggle data zip
 data/
+dist/
 *.arrow
 *.parquet
 

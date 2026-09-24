@@ -6,7 +6,8 @@ says is finished. `--dry-run` prints the plan and stops.
 Usage:
     python scripts/run_suite.py configs/suite_phase1.yaml --dry-run
     python scripts/run_suite.py configs/suite_phase1.yaml
-    python scripts/run_suite.py configs/suite_phase1.yaml --only A5 --model qwen2.5-3b
+    python scripts/run_suite.py configs/suite_phase1.yaml --only A5 --model qwen2.5-3b \
+        --split standard --seed 0 --runs-dir /kaggle/working/runs
 """
 from __future__ import annotations
 
@@ -35,6 +36,7 @@ def expand(suite_path: str) -> tuple[list[ExperimentConfig], dict]:
     arms = load_yaml(ROOT / "configs" / "arms.yaml")          # arm -> {role, supervision, inference}
     models = load_yaml(ROOT / "configs" / "models.yaml").get("models", {})  # model -> {tier, size_b, family}
     teacher = suite.get("teacher")
+    phase = suite.get("phase", 1)
     grid = suite.get("grid", {})
     keys = list(grid.keys())
 
@@ -53,6 +55,11 @@ def expand(suite_path: str) -> tuple[list[ExperimentConfig], dict]:
         if arm_role != model_tier:
             continue
 
+        # ≥70B models are Phase 2 (Job 4) only — never plan them on free hardware
+        if phase == 1 and model_spec.get("phase2_only"):
+            log.warning("dropping %s x %s: model is phase2_only (Job 4)", arm, model)
+            continue
+
         # seeds only matter for trained arms; collapse others to seed 0
         if arm not in TRAINED and d.get("seed", 0) != 0:
             continue
@@ -64,7 +71,7 @@ def expand(suite_path: str) -> tuple[list[ExperimentConfig], dict]:
             "seed": d.get("seed", 0),
             "split": d.get("split", "standard"),
             "dataset": d.get("dataset", base.get("dataset", "finqa")),
-            "phase": suite.get("phase", 1),
+            "phase": phase,
             "max_attempts": suite.get("max_attempts", 2),
         })
         if arm == "A8":
@@ -84,6 +91,9 @@ def main() -> None:
     ap.add_argument("--force", action="store_true", help="re-run even finished experiments")
     ap.add_argument("--only", help="restrict to a single arm, e.g. A5")
     ap.add_argument("--model", help="restrict to a single model key")
+    ap.add_argument("--split", help="restrict to one split: standard | clean")
+    ap.add_argument("--seed", type=int, help="restrict to one seed")
+    ap.add_argument("--runs-dir", help="override the suite's runs_dir (e.g. on Kaggle)")
     args = ap.parse_args()
 
     configs, suite = expand(args.suite)
@@ -91,8 +101,12 @@ def main() -> None:
         configs = [c for c in configs if c.arm == args.only]
     if args.model:
         configs = [c for c in configs if c.model == args.model]
+    if args.split:
+        configs = [c for c in configs if c.split == args.split]
+    if args.seed is not None:
+        configs = [c for c in configs if c.seed == args.seed]
 
-    runs_dir = suite.get("runs_dir", "runs")
+    runs_dir = args.runs_dir or suite.get("runs_dir", "runs")
     reg = Registry(runs_dir, max_attempts=suite.get("max_attempts", 2))
 
     # --- PLAN ---

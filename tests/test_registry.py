@@ -59,6 +59,17 @@ def test_force_reset(tmp_path):
     assert run
 
 
+def test_not_ready_does_not_consume_an_attempt(tmp_path):
+    reg = Registry(tmp_path, max_attempts=2)
+    for _ in range(3):  # far more launches than max_attempts
+        reg.mark_running("abc", "exp")
+        reg.mark_not_ready("abc", "NotImplementedError: stub")
+    st = reg.load("abc")
+    assert st.status == Status.PENDING.value and st.attempts == 0
+    run, _ = reg.should_run("abc", "exp")
+    assert run
+
+
 def test_summary_counts(tmp_path):
     reg = Registry(tmp_path)
     reg.mark_running("a", "a"); reg.mark_completed("a")

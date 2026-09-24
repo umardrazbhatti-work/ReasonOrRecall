@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 import random
 import subprocess
-from typing import Optional
+from pathlib import Path
 
 
 def set_seed(seed: int) -> None:
@@ -33,13 +33,19 @@ def set_seed(seed: int) -> None:
 
 
 def git_commit(short: bool = True) -> str:
-    """Current git commit, or '' if not a repo."""
+    """Commit of the repo this package lives in, or '' if it is not a git checkout.
+
+    Runs git in the repository root (not the cwd, which on Kaggle is elsewhere)
+    and appends '-dirty' when tracked files have uncommitted changes, so a result
+    is never attributed to a commit that does not contain the code that made it.
+    """
+    root = str(Path(__file__).resolve().parents[1])
     try:
-        args = ["git", "rev-parse", "--short" if short else "HEAD", "HEAD"]
-        if not short:
-            args = ["git", "rev-parse", "HEAD"]
-        out = subprocess.check_output(args, stderr=subprocess.DEVNULL)
-        return out.decode().strip()
+        args = ["git", "rev-parse", "--short", "HEAD"] if short else ["git", "rev-parse", "HEAD"]
+        sha = subprocess.check_output(args, cwd=root, stderr=subprocess.DEVNULL).decode().strip()
+        dirty = subprocess.run(["git", "diff", "--quiet", "HEAD"], cwd=root,
+                               stderr=subprocess.DEVNULL).returncode != 0
+        return sha + ("-dirty" if dirty else "")
     except Exception:
         return ""
 

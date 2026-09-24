@@ -92,7 +92,7 @@ class Registry:
         if not p.exists():
             return None
         try:
-            return RunState.from_json(p.read_text())
+            return RunState.from_json(p.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             return None
 
@@ -101,7 +101,7 @@ class Registry:
         p = self._state_path(state.exp_id)
         p.parent.mkdir(parents=True, exist_ok=True)
         tmp = p.with_suffix(".json.tmp")
-        tmp.write_text(state.to_json())
+        tmp.write_text(state.to_json(), encoding="utf-8")
         os.replace(tmp, p)  # atomic
 
     # --- the decision ---
@@ -154,6 +154,21 @@ class Registry:
             st.status = Status.PERMANENTLY_FAILED.value
         else:
             st.status = Status.FAILED.value
+        self.save(st)
+        return st
+
+    def mark_not_ready(self, exp_id: str, reason: str) -> RunState:
+        """Undo the attempt counted by `mark_running` and return to PENDING.
+
+        For runs that could not start because the *code* is not ready (a stub
+        still raising NotImplementedError), not because the experiment failed.
+        Without this, launching a suite before the ML modules exist would burn
+        every experiment's attempts and leave them permanently failed.
+        """
+        st = self.load(exp_id) or RunState(exp_id=exp_id, name="", max_attempts=self.max_attempts)
+        st.attempts = max(0, st.attempts - 1)
+        st.status = Status.PENDING.value
+        st.last_error = f"not ready: {reason}"[:4000]
         self.save(st)
         return st
 

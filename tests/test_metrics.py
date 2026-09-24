@@ -16,6 +16,19 @@ def test_normalize_number():
     assert normalize_number("n/a") is None
 
 
+def test_normalize_number_edge_forms():
+    assert normalize_number(".5") == 0.5
+    assert normalize_number("-.25") == -0.25
+    assert normalize_number("1e-05") == 1e-05
+    assert normalize_number("2.5E+3") == 2500.0
+    assert normalize_number("−5") == -5.0  # unicode minus
+    assert normalize_number("12.") == 12.0
+
+
+def test_answers_match_ignores_trailing_period():
+    assert answers_match("Yes.", "yes")
+
+
 def test_answers_match_numeric_tolerance():
     assert answers_match("15.0%", "15.0")
     assert answers_match("15.001", "15.0", rel_tol=1e-3)

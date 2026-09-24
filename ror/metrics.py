@@ -16,6 +16,9 @@ _SCALE = {
     "trillion": 1e12, "trillions": 1e12,
 }
 
+# optional sign, then "12", "12.", "12.5" or ".5", then an optional exponent
+_NUMBER_RE = re.compile(r"-?(?:\d+(?:\.\d*)?|\.\d+)(?:e[-+]?\d+)?")
+
 
 def normalize_number(text) -> Optional[float]:
     """Parse a numeric answer to a float, or return None if not numeric.
@@ -28,7 +31,7 @@ def normalize_number(text) -> Optional[float]:
         return None
     if isinstance(text, (int, float)):
         return float(text)
-    s = str(text).strip().lower()
+    s = str(text).strip().lower().replace("−", "-")  # unicode minus
     if not s:
         return None
 
@@ -45,7 +48,7 @@ def normalize_number(text) -> Optional[float]:
             break
 
     s = s.replace("$", "").replace(",", "").replace("%", "").strip()
-    m = re.search(r"-?\d+(?:\.\d+)?", s)
+    m = _NUMBER_RE.search(s)
     if not m:
         return None
     val = float(m.group()) * scale
@@ -62,7 +65,7 @@ def answers_match(pred, gold, rel_tol: float = 1e-3, abs_tol: float = 1e-4) -> b
 
 
 def _norm_str(x) -> str:
-    return re.sub(r"\s+", " ", str(x).strip().lower())
+    return re.sub(r"\s+", " ", str(x).strip().lower()).strip(" .")
 
 
 def exact_match(preds: Sequence, golds: Sequence, **kw) -> float:

@@ -1,0 +1,4 @@
+# Code runs on Kaggle (Linux): keep LF line endings in every checkout.
+* text=auto eol=lf
+*.docx binary
+*.zip binary

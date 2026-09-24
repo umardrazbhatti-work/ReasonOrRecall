@@ -8,14 +8,17 @@ evaluate -> assemble a RunResult. The training/inference/eval calls delegate to
 `ror.training`, `ror.inference`, `ror.data` — implement those; the flow here is
 complete and is what guarantees logging + idempotency.
 
-This shell is deliberately runnable: with the ML modules still stubbed it will
-mark the run FAILED with a NotImplementedError, which is the correct, logged
-behaviour until they are implemented.
+This shell is deliberately runnable: with the ML modules still stubbed, a run
+logs the NotImplementedError (runs/<id>/error.txt) and returns to PENDING
+*without* consuming an attempt — an unimplemented stub is not an experiment
+failure, and counting it would leave every experiment permanently failed before
+the code exists. NotImplementedError raised by a library still counts.
 """
 from __future__ import annotations
 
 import time
 import traceback
+from dataclasses import asdict
 from pathlib import Path
 from typing import Optional
 
@@ -84,6 +87,7 @@ def run_experiment(
         result.wall_time_s = time.time() - t0
         result.git_commit = git_commit()
         result.gpu = gpu_name()
+        result.config = asdict(cfg)
 
         append_result(runs_dir, result)
         reg.mark_completed(exp_id, metrics_path=str(run_dir / "result.json"))
@@ -93,12 +97,31 @@ def run_experiment(
 
     except Exception as e:  # noqa: BLE001 — we want to log *any* failure
         tb = traceback.format_exc()
-        (run_dir / "error.txt").write_text(tb)
+        (run_dir / "error.txt").write_text(tb, encoding="utf-8")
+        if _raised_by_stub(e):
+            reg.mark_not_ready(exp_id, f"{type(e).__name__}: {e}")
+            log.warning("NOT READY  %s — %s (attempt not counted; status: pending)",
+                        name, e)
+            return None
         st = reg.mark_failed(exp_id, f"{type(e).__name__}: {e}")
         log.error("FAIL  %s — %s (status now: %s)", name, e, st.status)
         return None
     finally:
         remove_handler(log, fh)
+
+
+def _raised_by_stub(exc: BaseException) -> bool:
+    """True if `exc` is a NotImplementedError raised directly by code in the
+    `ror` package (an unimplemented stub), as opposed to one from a library."""
+    if not isinstance(exc, NotImplementedError):
+        return False
+    tb = exc.__traceback__
+    if tb is None:
+        return False
+    while tb.tb_next is not None:
+        tb = tb.tb_next
+    origin = Path(tb.tb_frame.f_code.co_filename).resolve().parent
+    return origin == Path(__file__).resolve().parent
 
 
 def _execute(cfg: ExperimentConfig, run_dir: Path) -> RunResult:
@@ -126,11 +149,13 @@ def _execute(cfg: ExperimentConfig, run_dir: Path) -> RunResult:
     preds = inference.generate(model, cfg, examples)
     golds = [ex.answer for ex in examples]
 
+    spec = models.resolve_model(cfg.model)
     result = RunResult(
         exp_id=cfg.experiment_id, name=cfg.resolved_name(), arm=cfg.arm,
         model=cfg.model, role=cfg.role, supervision=cfg.supervision,
         inference=cfg.inference, dataset=cfg.dataset, split=cfg.split,
         seed=cfg.seed, phase=cfg.phase, n_examples=len(examples),
+        model_family=spec.get("family", ""), model_size_b=spec.get("size_b"),
     )
     result.exact_match = exact_match([p.answer for p in preds], golds)
 
