@@ -52,6 +52,19 @@ def build_plan(cfg: ExperimentConfig) -> list[str]:
     return steps
 
 
+def preflight(cfg: ExperimentConfig) -> tuple[bool, str]:
+    """Conditions that must hold before a run may consume an attempt (the data it
+    needs exists). Returns (ok, reason-if-not)."""
+    from .data import split_available
+
+    needed = [cfg.split] + (["train"] if cfg.arm in _TRAINED_ARMS else [])
+    for split in needed:
+        ok, why = split_available(cfg.dataset, split)
+        if not ok:
+            return False, why
+    return True, ""
+
+
 def run_experiment(
     cfg: ExperimentConfig,
     runs_dir: str | Path = "runs",
@@ -68,7 +81,12 @@ def run_experiment(
         if not do_run:
             log.info("SKIP  %s (%s) — %s", exp_id, name, reason)
             return None
-    else:
+
+    ready, why = preflight(cfg)
+    if not ready:
+        log.warning("SKIP  %s (%s) — not ready: %s", exp_id, name, why)
+        return None
+    if force:
         reg.force_reset(exp_id)
 
     run_dir = reg.run_dir(exp_id)
@@ -172,4 +190,5 @@ def _execute(cfg: ExperimentConfig, run_dir: Path) -> RunResult:
         result.faithfulness_proxy = posthoc_proxy_agreement(proxy_items)
 
     result.extra["notes"] = cfg.notes
+    result.extra["data"] = data.dataset_fingerprint(cfg.dataset, cfg.split)
     return result

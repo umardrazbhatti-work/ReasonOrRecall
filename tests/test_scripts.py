@@ -1,5 +1,6 @@
 """Tests for the suite planner and the results aggregator (scripts/)."""
 import importlib.util
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -15,20 +16,30 @@ def _load_script(name: str):
     return mod
 
 
-def _dry_run(tmp_path, *extra: str) -> str:
+def _dry_run(tmp_path, *extra: str, data_dir=None) -> str:
+    env = dict(os.environ)
+    if data_dir is not None:
+        env["ROR_DATA_DIR"] = str(data_dir)
     out = subprocess.run(
         [sys.executable, str(ROOT / "scripts" / "run_suite.py"),
          str(ROOT / "configs" / "suite_phase1.yaml"), "--dry-run",
          "--runs-dir", str(tmp_path), *extra],
-        capture_output=True, text=True, encoding="utf-8", errors="replace", check=True)
+        capture_output=True, text=True, encoding="utf-8", errors="replace", check=True,
+        env=env)
     return out.stdout + out.stderr
 
 
-def test_suite_filters_narrow_to_one_experiment(tmp_path):
-    log = _dry_run(tmp_path, "--only", "A5", "--model", "qwen2.5-3b",
-                   "--split", "standard", "--seed", "0")
-    assert "1 experiments" in log
+def test_suite_filters_narrow_to_one_experiment(tmp_path, fake_data_dir):
+    log = _dry_run(tmp_path / "runs", "--only", "A5", "--model", "qwen2.5-3b",
+                   "--split", "standard", "--seed", "0", data_dir=fake_data_dir)
+    assert "1 experiments (1 to run, 0 skipped)" in log
     assert "A5-qwen2.5-3b-finqa-standard-s0" in log
+
+
+def test_suite_plans_missing_clean_set_as_skipped(tmp_path, fake_data_dir):
+    log = _dry_run(tmp_path / "runs", "--only", "A5", "--model", "qwen2.5-3b",
+                   "--split", "clean", "--seed", "0", data_dir=fake_data_dir)
+    assert "(0 to run, 1 skipped)" in log and "clean set not built" in log
 
 
 def test_phase1_suite_never_plans_70b():

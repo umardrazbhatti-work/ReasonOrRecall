@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from ror.config import ExperimentConfig, config_from_dict, load_yaml, _deep_merge  # noqa: E402
-from ror.experiment import run_experiment  # noqa: E402
+from ror.experiment import preflight, run_experiment  # noqa: E402
 from ror.logging_utils import get_logger  # noqa: E402
 from ror.registry import Registry  # noqa: E402
 
@@ -113,6 +113,10 @@ def main() -> None:
     to_run, to_skip = [], []
     for c in configs:
         do_run, reason = (True, "forced") if args.force else reg.should_run(c.experiment_id, c.resolved_name())
+        if do_run:
+            ready, why = preflight(c)
+            if not ready:
+                do_run, reason = False, f"not ready: {why}"
         (to_run if do_run else to_skip).append((c, reason))
 
     log.info("SUITE %s — %d experiments (%d to run, %d skipped)",
