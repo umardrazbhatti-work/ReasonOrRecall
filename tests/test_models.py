@@ -31,3 +31,47 @@ def test_70b_refused_in_phase1():
 def test_32b_allowed_in_phase1_and_70b_in_phase2():
     check_phase_allowed("qwen2.5-32b", phase=1)
     check_phase_allowed("qwen2.5-72b", phase=2)
+
+
+def test_incompatible_torchao_is_hidden_from_peft(monkeypatch):
+    import importlib.metadata as md
+    import importlib.util
+
+    import ror.models as models
+
+    real_version = md.version
+    monkeypatch.setattr(md, "version",
+                        lambda name: "0.10.0" if name == "torchao" else real_version(name))
+    monkeypatch.delitem(sys.modules, "torchao", raising=False)
+    try:
+        assert models.hide_incompatible_torchao() is True
+        assert importlib.util.find_spec("torchao") is None   # what peft/transformers probe
+        with pytest.raises(ImportError):
+            import torchao  # noqa: F401
+    finally:
+        sys.modules.pop("torchao", None)
+
+
+def test_compatible_or_absent_torchao_is_left_alone(monkeypatch):
+    import importlib.metadata as md
+
+    import ror.models as models
+
+    monkeypatch.delitem(sys.modules, "torchao", raising=False)
+    monkeypatch.setattr(md, "version", lambda name: "0.16.0")
+    assert models.hide_incompatible_torchao() is False and "torchao" not in sys.modules
+
+    def missing(name):
+        raise md.PackageNotFoundError(name)
+
+    monkeypatch.setattr(md, "version", missing)
+    assert models.hide_incompatible_torchao() is False
+
+
+def test_peft_can_attach_lora_in_this_environment():
+    # Kaggle ships torchao 0.10; without the guard peft raises ImportError here.
+    iu = pytest.importorskip("peft.import_utils")
+    import ror.models as models
+
+    models.hide_incompatible_torchao()
+    iu.is_torchao_available()  # must not raise

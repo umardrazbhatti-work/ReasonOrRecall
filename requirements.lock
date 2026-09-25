@@ -16,3 +16,6 @@ huggingface_hub==1.11.0
 numpy==2.0.2
 PyYAML==6.0.3
 pytest==8.4.2
+# Also in the Kaggle image and deliberately NOT used: torchao==0.10.0 (for
+# torchtune). peft 0.19 rejects torchao < 0.16, so ror.models hides it before
+# loading a model (hide_incompatible_torchao). Local tests install it too.

@@ -25,6 +25,39 @@ FREE_TIER_MAX_SIZE_B = 34.0  # ~32B fits on T4x2 in 4-bit; 70B does not
 # "cpu" forces an unquantized fp32 CPU load (tests, local checks)
 DEVICE_ENV = "ROR_DEVICE"
 
+# peft refuses torchao older than this (ImportError when attaching LoRA layers)
+PEFT_MIN_TORCHAO = "0.16.0"
+
+
+def hide_incompatible_torchao() -> bool:
+    """Hide an installed-but-incompatible torchao from this process.
+
+    The Kaggle image ships torchao 0.10 (for torchtune). peft 0.19 raises
+    ImportError on any torchao older than 0.16 when it attaches LoRA layers,
+    instead of treating it as absent. This project never uses torchao, so an
+    incompatible install is blocked with `sys.modules["torchao"] = None` (Python's
+    documented way to make an import fail); `importlib.util.find_spec` then
+    reports it as missing and peft skips its torchao backend. A compatible or
+    already-imported torchao is left alone. Returns True if it hid torchao.
+    """
+    import sys
+    from importlib.metadata import PackageNotFoundError, version
+
+    from packaging.version import Version
+
+    if "torchao" in sys.modules:
+        return False
+    try:
+        installed = version("torchao")
+    except PackageNotFoundError:
+        return False
+    if Version(installed) >= Version(PEFT_MIN_TORCHAO):
+        return False
+    sys.modules["torchao"] = None  # type: ignore[assignment]
+    log.warning("hiding torchao %s: peft needs >= %s and this project does not use it",
+                installed, PEFT_MIN_TORCHAO)
+    return True
+
 
 @dataclass
 class LoadedModel:
@@ -77,6 +110,7 @@ def load_student(name: str, adapter_dir: Optional[str | Path] = None) -> LoadedM
     LoRA adapter is attached; otherwise the bare base model is returned and
     ror.training attaches a fresh LoRA with the experiment's r/alpha/dropout.
     """
+    hide_incompatible_torchao()   # before transformers/peft probe for it
     from transformers import AutoModelForCausalLM, BitsAndBytesConfig
 
     spec = resolve_model(name)
