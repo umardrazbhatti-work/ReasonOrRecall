@@ -3,6 +3,10 @@ runs/*
 !runs/.gitkeep
 runs_*/
 
+# Kaggle run outputs downloaded for review — local only
+Results/*
+!Results/README.md
+
 # data caches / the built clean set / the Kaggle data zip
 data/
 dist/

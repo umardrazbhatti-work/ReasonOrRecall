@@ -116,6 +116,7 @@ notebooks/
 tests/                   # pytest; framework, data and Kaggle helpers covered
 runs/                    # gitignored: per-run logs, adapters, results.jsonl
 data/, dist/             # gitignored: processed data and the Kaggle data zip
+Results/                 # gitignored: Kaggle run outputs, one folder per run (see its README)
 ```
 
 Code lives on GitHub (umardrazbhatti-work/ReasonOrRecall) and runs on Kaggle
