@@ -8,26 +8,99 @@ on free hardware. `load_teacher` must refuse a ≥70B model when phase == 1.
 """
 from __future__ import annotations
 
+import os
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
 from .config import load_yaml
+from .logging_utils import get_logger
 from .paths import repo_root
+
+log = get_logger("ror.models")
 
 # The guardrail reads size_b / phase2_only from configs/models.yaml.
 FREE_TIER_MAX_SIZE_B = 34.0  # ~32B fits on T4x2 in 4-bit; 70B does not
 
+# "cpu" forces an unquantized fp32 CPU load (tests, local checks)
+DEVICE_ENV = "ROR_DEVICE"
 
-def load_student(name: str, adapter_dir: Optional[str | Path] = None) -> Any:
-    """Load a ≤8B student in 4-bit (NF4) with a LoRA adapter attached.
 
-    TODO:
-      - resolve `name` via configs/models.yaml -> hf_id, size_b
-      - load base with bitsandbytes 4-bit (nf4, double-quant, bf16 compute)
-      - attach a fresh peft LoraConfig, or load `adapter_dir` if given
-      - return an object exposing generation (the wrapper `ror.inference` expects)
+@dataclass
+class LoadedModel:
+    """A model ready for generation, plus what the experiment needs to log."""
+    model: Any
+    tokenizer: Any
+    spec: dict                      # configs/models.yaml entry
+    quantized: bool                 # 4-bit NF4 (GPU) vs full precision (CPU)
+    adapter_dir: Optional[str] = None
+    train_stats: dict = field(default_factory=dict)  # filled by ror.training
+
+    @property
+    def n_params(self) -> float:
+        return float(self.spec.get("size_b") or 0.0) * 1e9
+
+
+def use_cuda() -> bool:
+    """True if a CUDA GPU is available and not overridden by ROR_DEVICE=cpu."""
+    import torch
+
+    return os.environ.get(DEVICE_ENV, "").lower() != "cpu" and torch.cuda.is_available()
+
+
+def compute_dtype() -> Any:
+    """fp16 on pre-Ampere GPUs (the T4 has no bf16), bf16 on Ampere+, fp32 on CPU.
+    (torch.cuda.is_bf16_supported() also reports emulated bf16, so check the
+    compute capability instead.)"""
+    import torch
+
+    if not use_cuda():
+        return torch.float32
+    major, _ = torch.cuda.get_device_capability(0)
+    return torch.bfloat16 if major >= 8 else torch.float16
+
+
+def load_tokenizer(hf_id: str) -> Any:
+    """Tokenizer with a pad token and left padding (for batched generation)."""
+    from transformers import AutoTokenizer
+
+    tok = AutoTokenizer.from_pretrained(hf_id)
+    if tok.pad_token is None:
+        tok.pad_token = tok.eos_token
+    tok.padding_side = "left"
+    return tok
+
+
+def load_student(name: str, adapter_dir: Optional[str | Path] = None) -> LoadedModel:
+    """Load a ≤8B student: 4-bit NF4 (double quantization, fp16/bf16 compute) on
+    a single GPU, or full precision on CPU. If `adapter_dir` is given the trained
+    LoRA adapter is attached; otherwise the bare base model is returned and
+    ror.training attaches a fresh LoRA with the experiment's r/alpha/dropout.
     """
-    raise NotImplementedError("implement 4-bit QLoRA student loading")
+    from transformers import AutoModelForCausalLM, BitsAndBytesConfig
+
+    spec = resolve_model(name)
+    cuda = use_cuda()
+    dtype = compute_dtype()
+    kwargs: dict[str, Any] = {"dtype": dtype}
+    if cuda:
+        kwargs["quantization_config"] = BitsAndBytesConfig(
+            load_in_4bit=True, bnb_4bit_quant_type="nf4",
+            bnb_4bit_use_double_quant=True, bnb_4bit_compute_dtype=dtype)
+        kwargs["device_map"] = {"": 0}   # one GPU; QLoRA ≤8B fits on a T4
+    else:
+        log.warning("no CUDA GPU (or ROR_DEVICE=cpu): loading %s unquantized on CPU",
+                    spec["hf_id"])
+    log.info("loading %s (%s)%s", name, spec["hf_id"],
+             f" + adapter {adapter_dir}" if adapter_dir else "")
+    model = AutoModelForCausalLM.from_pretrained(spec["hf_id"], **kwargs)
+    if adapter_dir:
+        from peft import PeftModel
+
+        model = PeftModel.from_pretrained(model, str(adapter_dir))
+    model.eval()
+    return LoadedModel(model=model, tokenizer=load_tokenizer(spec["hf_id"]), spec=spec,
+                       quantized=cuda, adapter_dir=str(adapter_dir) if adapter_dir else None)
 
 
 def load_teacher(name: str, phase: int = 1) -> Any:

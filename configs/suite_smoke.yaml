@@ -1,0 +1,20 @@
+# Smoke suite: the A5 pipeline end-to-end on a small slice (~20 min on a T4).
+# Proves the GPU path (4-bit load, QLoRA, checkpoint, generation, scoring,
+# logging) and measures training throughput before the multi-hour full run.
+# Separate runs_dir, so smoke rows never enter the ablation study.
+#   python scripts/run_suite.py configs/suite_smoke.yaml --dry-run
+phase: 1
+runs_dir: runs_smoke
+max_attempts: 2
+
+# applied on top of base.yaml + the arm spec for every run in this suite
+overrides:
+  train_examples: 64
+  eval_examples: 32
+  epochs: 1
+
+grid:
+  arm:    [A5]
+  model:  [qwen2.5-3b]
+  seed:   [0]
+  split:  [standard]

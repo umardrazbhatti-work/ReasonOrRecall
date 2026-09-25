@@ -36,6 +36,7 @@ IDENTITY_FIELDS = (
     "seed",
     "teacher",
     "train_examples",
+    "eval_examples",
     "epochs",
     "lora_r",
     "lora_alpha",
@@ -66,13 +67,14 @@ class ExperimentConfig:
     phase: int = 1
 
     # --- training hyperparameters (identity-affecting) ---
-    train_examples: Optional[int] = None  # None = all
+    train_examples: Optional[int] = None  # None = all (else a seeded sample)
+    eval_examples: Optional[int] = None   # None = all (else the first N; smoke runs)
     epochs: int = 3
     lora_r: int = 16
     lora_alpha: int = 32
     lora_dropout: float = 0.05
     learning_rate: float = 2e-4
-    max_seq_len: int = 1024
+    max_seq_len: int = 2048
     batch_size: int = 1
     grad_accum: int = 16
 
@@ -82,6 +84,7 @@ class ExperimentConfig:
     temperature: float = 0.0
 
     # --- non-identity / operational (excluded from the id hash) ---
+    infer_batch_size: int = 8      # generation batch size
     name: str = ""                 # human label; derived if empty
     max_attempts: int = 2
     notes: str = ""

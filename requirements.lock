@@ -1,0 +1,18 @@
+# Exact versions the code is tested against: the Kaggle GPU image as of
+# 2026-09-25 (Python 3.12, CUDA 12.8), taken from that session's `pip freeze`.
+# The notebook installs peft/trl/bitsandbytes at these pins and saves the full
+# freeze of every session to /kaggle/working/requirements.lock (run output).
+# Local CPU tests were run in a venv with the same ML-library pins.
+torch==2.10.0+cu128
+transformers==5.0.0
+trl==1.14.0
+peft==0.19.1
+bitsandbytes==0.50.2
+accelerate==1.13.0
+datasets==5.0.0
+tokenizers==0.22.2
+safetensors==0.7.0
+huggingface_hub==1.11.0
+numpy==2.0.2
+PyYAML==6.0.3
+pytest==8.4.2

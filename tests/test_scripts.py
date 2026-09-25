@@ -75,3 +75,12 @@ def test_aggregate_separates_datasets_and_variants():
             _row("c", epochs=1)]
     table, _ = agg.aggregate(rows)
     assert len(table) == 3
+
+
+def test_smoke_suite_applies_overrides_and_its_own_runs_dir():
+    run_suite = _load_script("run_suite")
+    configs, suite = run_suite.expand(str(ROOT / "configs" / "suite_smoke.yaml"))
+    assert len(configs) == 1 and suite["runs_dir"] == "runs_smoke"
+    c = configs[0]
+    assert (c.arm, c.train_examples, c.eval_examples, c.epochs) == ("A5", 64, 32, 1)
+    assert c.max_seq_len == 2048                     # base.yaml still applies

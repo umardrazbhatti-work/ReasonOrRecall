@@ -68,3 +68,16 @@ def test_missing_data_skips_without_touching_the_registry(tmp_path, fake_data_di
     reg = Registry(tmp_path / "runs")
     assert experiment.run_experiment(cfg, runs_dir=tmp_path / "runs", registry=reg) is None
     assert reg.load(cfg.experiment_id) is None  # no attempt, no state
+
+
+def test_session_budget_pauses_before_training_without_an_attempt(tmp_path, monkeypatch,
+                                                                  fake_data_dir):
+    import ror.training as training
+
+    monkeypatch.setattr(training, "seconds_left", lambda: 60.0)   # 1 minute left
+    cfg = _cfg()
+    reg = Registry(tmp_path)
+    assert experiment.run_experiment(cfg, runs_dir=tmp_path, registry=reg) is None
+    st = reg.load(cfg.experiment_id)
+    assert st.status == Status.PENDING.value and st.attempts == 0
+    assert "paused" in st.last_error

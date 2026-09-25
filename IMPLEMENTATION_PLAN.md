@@ -38,8 +38,10 @@ depend on them. Update this file as you go; it is the shared plan.
       ConvFinQA 100%, TAT-QA arithmetic ~99%), sandbox spot-checked
 - [x] `linearize_table` + `normalize_numbers` preprocessing
 - [ ] `format_target(example, supervision)` for answer-only / CoT / PoT-gold
-      (`gold_program` is already verified Python, so PoT-gold is nearly free)
-- [ ] `build_prompt` (ConvFinQA history is in `meta.history`)
+      (answer-only and PoT-gold done and tested; CoT (A6) needs a rationale
+      format designed first)
+- [x] `build_prompt` + `build_messages` for answer and PoT styles, few-shot,
+      ConvFinQA history; shared by training and inference
 - [x] Wire ConvFinQA + TAT-QA loaders (used in v2; keep interface identical)
       (TAT-QA span / multi-span scoring still needs v2 metrics)
 
@@ -52,18 +54,25 @@ depend on them. Update this file as you go; it is the shared plan.
       them and skip trace generation in Job 3.
 
 ### Models (`ror/models.py`)
-- [ ] `load_student(name)` — 4-bit NF4 base + LoRA adapters (Qwen2.5-3B first)
+- [x] `load_student(name)` — 4-bit NF4 (double quant, fp16 compute on T4) + LoRA
+      adapter; CPU path tested, 4-bit path runs first in the smoke suite
 - [ ] `load_teacher(name)` — Phase 1: ~32B on T4×2 (device_map); Phase 2: ≥70B
       via API/vLLM. (The ≥70B phase-1 guard and `resolve_model` are implemented
       and tested; loading is TODO.)
 
 ### Training (`ror/training.py`) — Job 1
-- [ ] QLoRA SFT loop (trl `SFTTrainer`), resumable checkpoints to `runs/<id>/`
+- [x] QLoRA SFT loop (trl `SFTTrainer`), resumable checkpoints to `runs/<id>/`:
+      completion-only loss (verified), checkpoints every 50 steps, clean pause
+      before the session deadline (no attempt used), resume tested end-to-end
+- [x] Smoke suite `configs/suite_smoke.yaml` (64 train / 32 eval, own runs dir)
+- [ ] Smoke run passes on Kaggle T4; record tokens/s → decide epochs for the study
 - [ ] Get **one** arm end-to-end: A5, Qwen2.5-3B, FinQA — logged in results.jsonl
 - [ ] Then A6, A7; then the size sweep (Qwen2.5-7B) and cross-family (Llama-3.1-8B)
 
 ### Inference + eval (`ror/inference.py`) — Job 2
 - [ ] Greedy generation + batched decode; self-consistency (k configurable)
+      (greedy + batched done: explicit decoding config, no repetition penalty;
+      per-item predictions.jsonl; self-consistency still TODO)
 - [ ] Evaluate every arm on `standard` AND `clean`; log EM / faithfulness / exec
 - [ ] Post-hoc program-induction proxy for non-PoT arms (`ror.faithfulness`)
 
@@ -83,13 +92,13 @@ depend on them. Update this file as you go; it is the shared plan.
   percent are scored wrong. Decide the rule (e.g. accept x or x/100 for
   percentage questions) in `ror.metrics` before evaluating A1–A4. A5–A8 learn
   the decimal form and are unaffected.
-- **`max_seq_len` (before A5):** 54% of FinQA prompts exceed 1024 Qwen tokens
-  (p95 ≈ 1,630, p99 ≈ 2,270). Proposed: 2048, drop the ~1.5% longer training
-  items, never truncate eval prompts.
+- ~~**`max_seq_len`**~~ resolved: 2048 (decided 2026-09-25). Longer training
+  items (~1.5%) are dropped, eval prompts are never truncated.
 - **Compute budget (before the sweep):** 3 epochs at 2048 ≈ 20M training tokens
-  per A5 run; measure T4 throughput with a smoke run first, then fix epochs.
+  per A5 run; the smoke run logs tokens/s — use it to fix epochs.
 - **Session kills cost attempts:** a Kaggle session killed mid-run counts as an
-  attempt (default `max_attempts: 2`). Keep each experiment within one session.
+  attempt (default `max_attempts: 2`). Mitigated: runs pause cleanly before
+  `SESSION_HOURS` (no attempt used) and resume from the checkpoint.
 
 ## Phase 2 — Job 4 (paid, only after Phase 1 is validated)
 

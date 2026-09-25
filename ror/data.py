@@ -90,8 +90,8 @@ def dataset_fingerprint(name: str, split: str) -> dict:
     """Provenance for a result row: which file, its sha256, and the data manifest
     version it came from."""
     path = split_path(name, split)
-    info = {"file": str(path.relative_to(data_dir())) if path.is_relative_to(data_dir())
-            else str(path), "sha256": _sha256(path)}
+    info = {"file": path.relative_to(data_dir()).as_posix() if path.is_relative_to(data_dir())
+            else path.as_posix(), "sha256": _sha256(path)}
     if manifest_path().exists():
         m = json.loads(manifest_path().read_text(encoding="utf-8"))
         info["preprocess_version"] = m.get("preprocess_version")
@@ -147,32 +147,112 @@ def normalize_numbers(text: str) -> str:
     return _THOUSANDS_SEP.sub("", text)
 
 
+# --- prompts and targets -------------------------------------------------------
+# Training (ror.training) and inference (ror.inference) both build their input
+# with `build_messages`, so a model is evaluated on exactly the prompt format it
+# was trained on. Changing any text below changes model inputs: treat it as part
+# of the method.
+
+SYSTEM_PROMPT = ("You are a financial analyst. Answer the question using only the "
+                 "report excerpt provided (its text and table).")
+
+_INSTRUCTIONS = {
+    ("answer", "default"): (
+        "Give only the final answer: a number (write ratios and percentages as "
+        "decimals, e.g. 0.145 for 14.5%) or yes/no."),
+    ("answer", "tatqa"): (
+        "Give only the final answer: a number in the report's units (percentages "
+        "as percent values, e.g. 14.5), a text span, or several spans separated "
+        "by '; '."),
+    ("pot", "default"): (
+        "Write a Python program that computes the answer from the numbers in the "
+        "report and assigns it to a variable named `answer` (ratios and "
+        "percentages as decimals; \"yes\"/\"no\" for comparisons). Reply with only "
+        "the program in a ```python code block."),
+    ("pot", "tatqa"): (
+        "Write a Python program that computes the answer from the numbers in the "
+        "report and assigns it to a variable named `answer`, in the report's units "
+        "(percentages as percent values). Reply with only the program in a "
+        "```python code block."),
+}
+
+# which prompt style each supervision format trains/evaluates with
+PROMPT_STYLE = {"none": "answer", "answer": "answer", "cot": "cot",
+                "pot_gold": "pot", "pot_distilled": "pot"}
+_SUPERVISION_FOR_STYLE = {"answer": "answer", "cot": "cot", "pot": "pot_gold"}
+
+
+def format_answer(value: object) -> str:
+    """Canonical text of a gold answer: integers without a decimal point, other
+    numbers to at most 5 decimals (FinQA's execution precision), strings as-is."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return str(value)
+    if float(value).is_integer():
+        return str(int(value))
+    return f"{value:.5f}".rstrip("0").rstrip(".")
+
+
 def format_target(example: Example, supervision: str) -> str:
     """Build the supervised target string for a training example.
 
     supervision:
-      "answer"        -> just the final answer
-      "cot"           -> a natural-language rationale then the answer
-      "pot_gold"      -> the gold executable program (must assign `answer`)
-      "pot_distilled" -> a teacher-generated program (provided at train time;
-                         this function may be unused for that arm)
-
-    TODO: implement the answer/cot/pot_gold cases. See proposal 5.3 for the
-    exact three-format scheme and the worked example. (`gold_program` is already
-    execution-verified Python for FinQA/ConvFinQA, see ror.preprocess.)
+      "answer"        -> just the final answer (`format_answer`)
+      "cot"           -> a natural-language rationale then the answer (A6; TODO)
+      "pot_gold"      -> the gold executable program in a ```python block
+                         (execution-verified in ror.preprocess)
+      "pot_distilled" -> teacher programs come from training.load_distilled_traces
     """
-    raise NotImplementedError("implement target formatting per supervision")
+    if supervision == "answer":
+        return format_answer(example.answer)
+    if supervision == "pot_gold":
+        if not example.gold_program:
+            raise ValueError(f"{example.uid} has no verified gold program")
+        return f"```python\n{example.gold_program}\n```"
+    if supervision == "cot":
+        raise NotImplementedError("CoT targets (A6): design the rationale format first")
+    if supervision == "pot_distilled":
+        raise ValueError("pot_distilled targets are teacher traces "
+                         "(training.load_distilled_traces), not format_target")
+    raise ValueError(f"unknown supervision {supervision!r}")
 
 
 def build_prompt(example: Example, fewshot: list[Example] | None = None,
                  style: str = "pot") -> str:
-    """Assemble the inference prompt (optionally with few-shot exemplars).
+    """Assemble the user message (optionally with few-shot exemplars).
 
     style in {"answer", "cot", "pot"} controls what the model is asked to emit.
-    ConvFinQA items carry the earlier turns in example.meta["history"].
-    TODO: implement; keep exemplar formatting consistent with `format_target`.
+    ConvFinQA items carry the earlier turns in example.meta["history"]. Exemplars
+    show their targets exactly as `format_target` would produce them.
     """
-    raise NotImplementedError("implement prompt construction")
+    if style not in ("answer", "pot"):
+        raise NotImplementedError(f"prompt style {style!r} (CoT is A6; not designed yet)")
+    parts = []
+    for i, ex in enumerate(fewshot or [], 1):
+        target = format_target(ex, _SUPERVISION_FOR_STYLE[style])
+        parts.append(f"Example {i}\n\n{_task_block(ex)}\n\nAnswer:\n{target}")
+    if parts:
+        parts.append("Now answer this one.")
+    parts.append(_task_block(example))
+    dataset = "tatqa" if example.meta.get("dataset") == "tatqa" else "default"
+    parts.append(_INSTRUCTIONS[(style, dataset)])
+    return "\n\n".join(parts)
+
+
+def build_messages(example: Example, style: str,
+                   fewshot: list[Example] | None = None) -> list[dict]:
+    """Chat messages (system + user) for training and inference alike."""
+    return [{"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": build_prompt(example, fewshot, style)}]
+
+
+def _task_block(example: Example) -> str:
+    history = example.meta.get("history") or []
+    convo = ""
+    if history:
+        turns = "\n".join(f"Q: {h['question']}\nA: {format_answer(h['answer'])}"
+                          for h in history)
+        convo = f"Conversation so far:\n{turns}\n\n"
+    return f"Report:\n{example.context}\n\n{convo}Question: {example.question}"
 
 
 # --- helpers ---

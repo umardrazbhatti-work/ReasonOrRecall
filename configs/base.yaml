@@ -12,11 +12,12 @@ defaults:
   lora_alpha: 32
   lora_dropout: 0.05
   learning_rate: 2.0e-4
-  max_seq_len: 1024
+  max_seq_len: 2048          # covers 98.5% of FinQA; longer training items are dropped, eval never truncated
   batch_size: 1
   grad_accum: 16
 
   # inference
+  infer_batch_size: 8        # operational (not part of the experiment id)
   self_consistency_k: 1
   max_new_tokens: 512
   temperature: 0.0

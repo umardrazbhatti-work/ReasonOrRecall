@@ -93,8 +93,11 @@ Implemented: the framework (`config`, `registry`, `results`, `logging_utils`,
 `utils`, `sandbox`, `metrics`, `faithfulness`, `experiment`, `paths`, `kaggle`),
 the data layer (`data` loaders + `preprocess`), the model registry and ≥70B
 guard in `models`, the Kaggle notebook, and all `scripts/` except the clean set.
-TODO (contracts in the docstrings): `data.format_target` / `data.build_prompt`,
-model loading in `models`, `training`, `inference`, and
-`scripts/build_clean_set.py`. Follow `IMPLEMENTATION_PLAN.md`. Until those
-exist, a run stops at the first stub and returns to *pending* without using up
-an attempt.
+Arm A5 (QLoRA answer-only) runs end to end: prompts/targets in `data`, 4-bit
+student loading in `models`, resumable QLoRA in `training`, greedy batched
+generation in `inference`. Run `configs/suite_smoke.yaml` first (about 20 min on a
+T4), then `configs/suite_phase1.yaml`.
+TODO (contracts in the docstrings): CoT targets (A6), teacher loading and
+distilled traces (A3/A4/A8), self-consistency, the post-hoc faithfulness proxy,
+and `scripts/build_clean_set.py`. Follow `IMPLEMENTATION_PLAN.md`. A run that
+reaches an unimplemented stub returns to *pending* without using up an attempt.

@@ -9,7 +9,9 @@ from __future__ import annotations
 import os
 import random
 import subprocess
+import time
 from pathlib import Path
+from typing import Optional
 
 
 def set_seed(seed: int) -> None:
@@ -50,6 +52,21 @@ def git_commit(short: bool = True) -> str:
         return ""
 
 
+def library_versions(names: tuple[str, ...] = ("torch", "transformers", "trl", "peft",
+                                               "bitsandbytes", "accelerate", "datasets")
+                     ) -> dict[str, Optional[str]]:
+    """Installed versions of the ML stack, recorded with every result."""
+    from importlib.metadata import PackageNotFoundError, version
+
+    out: dict[str, Optional[str]] = {}
+    for n in names:
+        try:
+            out[n] = version(n)
+        except PackageNotFoundError:
+            out[n] = None
+    return out
+
+
 def gpu_name() -> str:
     try:
         import torch
@@ -59,6 +76,28 @@ def gpu_name() -> str:
     except Exception:
         pass
     return "cpu"
+
+
+# --- session time budget (Kaggle sessions are hard-killed at ~12h) ---
+
+DEADLINE_ENV = "ROR_DEADLINE_UNIX"
+
+
+class RunPaused(Exception):
+    """Raised when a run stops on purpose (session time budget) with its progress
+    saved. The runner returns it to PENDING without consuming an attempt; the next
+    session resumes it from the checkpoint."""
+
+
+def seconds_left() -> Optional[float]:
+    """Seconds until the session deadline ($ROR_DEADLINE_UNIX), or None if unset."""
+    raw = os.environ.get(DEADLINE_ENV)
+    if not raw:
+        return None
+    try:
+        return float(raw) - time.time()
+    except ValueError:
+        return None
 
 
 # --- FLOP estimates (first-order; see docstring) ---

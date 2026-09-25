@@ -68,3 +68,17 @@ def test_restore_runs_is_idempotent_and_never_overwrites(tmp_path):
     assert rep["files_copied"] == 0 and rep["results_added"] == 0
     assert json.loads((dest / "done1" / "status.json").read_text())["name"] == "x"
     assert len((dest / "results.jsonl").read_text().splitlines()) == 1
+
+
+def test_runs_dir_for_uses_the_suites_runs_dir(tmp_path):
+    from ror.kaggle import runs_dir_for
+
+    root = Path(__file__).resolve().parents[1] / "configs"
+    assert runs_dir_for(root / "suite_smoke.yaml", working=tmp_path) == tmp_path / "runs_smoke"
+    assert runs_dir_for(root / "suite_phase1.yaml", working=tmp_path) == tmp_path / "runs"
+
+
+def test_restore_never_mixes_smoke_and_study_registries(tmp_path):
+    _previous_output(tmp_path / "input" / "nb")            # a "runs" registry
+    rep = restore_runs(tmp_path / "working" / "runs_smoke", roots=[tmp_path / "input"])
+    assert rep["sources"] == [] and rep["files_copied"] == 0

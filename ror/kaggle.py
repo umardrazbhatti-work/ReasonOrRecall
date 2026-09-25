@@ -99,12 +99,44 @@ def ensure_data_dir(roots: Iterable[Path] = (KAGGLE_INPUT,),
     return None
 
 
+def runs_dir_for(suite_path: str | Path, working: Path = KAGGLE_WORKING) -> Path:
+    """Where a suite's registry lives on Kaggle: /kaggle/working/<suite runs_dir>.
+    Keeps e.g. smoke runs (runs_smoke) apart from the study (runs)."""
+    from .config import load_yaml
+
+    return Path(working) / Path(load_yaml(suite_path).get("runs_dir", "runs")).name
+
+
+def latest_results(runs_dir: Path, n: int = 5) -> list[str]:
+    """One human-readable line per most recent result row."""
+    from .results import load_results
+
+    lines = []
+    for r in load_results(runs_dir)[-n:]:
+        train = (r.get("extra") or {}).get("train") or {}
+        parts = [f"{r['name']}: EM={_pct(r.get('exact_match'))} on {r.get('n_examples')} items",
+                 f"wall {(r.get('wall_time_s') or 0) / 60:.1f} min"]
+        if train:
+            parts.append(f"trained on {train.get('n_train')} items, "
+                         f"loss {train.get('train_loss') or float('nan'):.4f}, "
+                         f"{train.get('tokens_per_s') or 0:.0f} tok/s")
+        parts.append(str(r.get("gpu", "")))
+        lines.append(" | ".join(parts))
+    return lines
+
+
+def _pct(x: Optional[float]) -> str:
+    return "n/a" if x is None else f"{100 * x:.1f}%"
+
+
 def _runs_sources(roots: Iterable[Path], dest: Path, max_depth: int) -> list[Path]:
-    """Previous runs directories (hold results.jsonl or */status.json), newest first."""
+    """Previous runs directories with the same name as `dest` (so a smoke registry
+    never mixes with the study's) that hold results.jsonl or */status.json,
+    newest first."""
     dest = dest.resolve()
     found = []
     for d in _walk_dirs(roots, max_depth):
-        if d.resolve() == dest:
+        if d.resolve() == dest or d.name != dest.name:
             continue
         if (d / RESULTS_FILE).is_file() or any(d.glob("*/status.json")):
             files = [p for p in d.rglob("*") if p.is_file()]

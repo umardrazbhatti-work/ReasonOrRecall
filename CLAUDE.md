@@ -92,17 +92,18 @@ ror/                     # the package — all real logic lives here
   faithfulness.py        # primary (PoT) + post-hoc proxy faithfulness      [IMPLEMENTED]
   experiment.py          # orchestration: plan -> train? -> infer -> eval -> log [IMPLEMENTED shell]
   paths.py               # repo/data locations; $ROR_DATA_DIR                [IMPLEMENTED]
-  data.py                # loaders + linearize/normalize [IMPLEMENTED]; format_target, build_prompt [TODO]
+  data.py                # loaders, prompts, targets [IMPLEMENTED]; CoT target [TODO]
   preprocess.py          # pinned raw benchmarks -> verified Example JSONL    [IMPLEMENTED]
   kaggle.py              # Kaggle helpers: secrets, data dir, registry restore [IMPLEMENTED]
-  models.py              # resolve_model + ≥70B guard [IMPLEMENTED]; loading   [TODO — contracts given]
-  training.py            # QLoRA SFT loop                                    [TODO — contracts given]
-  inference.py           # generation + self-consistency                     [TODO — contracts given]
+  models.py              # registry, ≥70B guard, 4-bit student load [IMPLEMENTED]; teacher load [TODO]
+  training.py            # resumable QLoRA SFT with time budget [IMPLEMENTED]; distilled traces [TODO]
+  inference.py           # greedy batched generation + parsing [IMPLEMENTED]; self-consistency, post-hoc proxy [TODO]
 configs/
   base.yaml              # shared defaults
   models.yaml            # model registry (students, teachers, sizes, cutoffs)
   arms.yaml              # A1..A8 supervision/inference specs
   suite_phase1.yaml      # the Phase-1 sweep (arms × students × seeds × splits)
+  suite_smoke.yaml       # A5 on a small slice (own runs_smoke/ registry) — run first
 scripts/
   run_suite.py           # expand a suite, skip finished, plan then run     [IMPLEMENTED]
   run_experiment.py      # run one experiment by config path                [IMPLEMENTED]

@@ -25,8 +25,9 @@ from typing import Optional
 from .config import ExperimentConfig
 from .logging_utils import add_run_file_handler, get_logger, remove_handler
 from .registry import Registry
-from .results import RunResult, append_result
-from .utils import git_commit, gpu_name, set_seed
+from .results import RunResult, append_result, write_predictions
+from .utils import (RunPaused, git_commit, gpu_name, inference_flops, library_versions,
+                    set_seed)
 
 log = get_logger("ror.experiment")
 
@@ -40,13 +41,16 @@ def build_plan(cfg: ExperimentConfig) -> list[str]:
     if cfg.arm in _TRAINED_ARMS:
         steps.append(
             f"train: QLoRA {cfg.model} on {cfg.dataset} "
-            f"(supervision={cfg.supervision}, epochs={cfg.epochs}, r={cfg.lora_r})"
+            f"(supervision={cfg.supervision}, epochs={cfg.epochs}, r={cfg.lora_r}, "
+            f"max_seq_len={cfg.max_seq_len}, "
+            f"examples={cfg.train_examples or 'all'})"
         )
         if cfg.supervision == "pot_distilled":
             steps.append(f"  uses distilled traces from teacher={cfg.teacher}")
     else:
         steps.append(f"no training (arm {cfg.arm}, inference={cfg.inference})")
-    steps.append(f"infer on split={cfg.split}, k={cfg.self_consistency_k}")
+    steps.append(f"infer on split={cfg.split} ({cfg.eval_examples or 'all'} examples), "
+                 f"k={cfg.self_consistency_k}")
     steps.append("evaluate: exact_match, execution_accuracy, faithfulness, executability")
     steps.append("log RunResult -> runs/results.jsonl")
     return steps
@@ -116,6 +120,11 @@ def run_experiment(
     except Exception as e:  # noqa: BLE001 — we want to log *any* failure
         tb = traceback.format_exc()
         (run_dir / "error.txt").write_text(tb, encoding="utf-8")
+        if isinstance(e, RunPaused):
+            reg.mark_not_ready(exp_id, f"paused: {e}")
+            log.warning("PAUSED  %s — %s (attempt not counted; resumes next session)",
+                        name, e)
+            return None
         if _raised_by_stub(e):
             reg.mark_not_ready(exp_id, f"{type(e).__name__}: {e}")
             log.warning("NOT READY  %s — %s (attempt not counted; status: pending)",
@@ -155,6 +164,8 @@ def _execute(cfg: ExperimentConfig, run_dir: Path) -> RunResult:
                                posthoc_proxy_agreement)
 
     examples = data.load_dataset(cfg.dataset, cfg.split)
+    if cfg.eval_examples:
+        examples = examples[:cfg.eval_examples]
 
     model = None
     if cfg.arm in _TRAINED_ARMS:
@@ -176,6 +187,8 @@ def _execute(cfg: ExperimentConfig, run_dir: Path) -> RunResult:
         model_family=spec.get("family", ""), model_size_b=spec.get("size_b"),
     )
     result.exact_match = exact_match([p.answer for p in preds], golds)
+    _record_compute(result, model, preds, float(spec.get("size_b") or 0.0) * 1e9)
+    write_predictions(run_dir, _prediction_rows(preds, golds))
 
     if any(getattr(p, "program", None) for p in preds):
         exec_vals = [getattr(p, "exec_value", None) for p in preds]
@@ -191,4 +204,32 @@ def _execute(cfg: ExperimentConfig, run_dir: Path) -> RunResult:
 
     result.extra["notes"] = cfg.notes
     result.extra["data"] = data.dataset_fingerprint(cfg.dataset, cfg.split)
+    result.extra["unparsed_answers"] = sum(p.answer is None for p in preds)
+    result.extra["decoding"] = inference.decoding_settings(cfg)
+    result.extra["versions"] = library_versions()
     return result
+
+
+def _record_compute(result: RunResult, model: object, preds: list, n_params: float) -> None:
+    """Training FLOPs/stats from the trained model, inference FLOPs from the
+    actual prompt and generated token counts (for the compute frontier)."""
+    stats = getattr(model, "train_stats", None) or {}
+    if stats:
+        result.train_flops = stats.get("train_flops")
+        result.extra["train"] = stats
+    if preds:
+        n = len(preds)
+        result.infer_flops = inference_flops(
+            n_params, prompt_tokens=sum(p.prompt_tokens for p in preds) / n,
+            gen_tokens=sum(p.gen_tokens for p in preds) / n, n_examples=n)
+
+
+def _prediction_rows(preds: list, golds: list) -> list[dict]:
+    """Per-item records for runs/<exp_id>/predictions.jsonl (error analysis and
+    the per-item reason-vs-recall analysis)."""
+    from .metrics import answers_match
+
+    return [{"uid": p.uid, "gold": g, "pred": p.answer, "correct": answers_match(p.answer, g),
+             "text": p.text, "program": p.program, "exec_value": p.exec_value,
+             "prompt_tokens": p.prompt_tokens, "gen_tokens": p.gen_tokens}
+            for p, g in zip(preds, golds)]

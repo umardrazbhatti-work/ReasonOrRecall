@@ -71,6 +71,16 @@ def append_result(runs_dir: str | Path, result: RunResult) -> Path:
     return master
 
 
+def write_predictions(run_dir: str | Path, rows: list[dict]) -> Path:
+    """Write one JSON line per evaluated item to <run_dir>/predictions.jsonl."""
+    path = Path(run_dir) / "predictions.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        for r in rows:
+            f.write(json.dumps(r, default=str, ensure_ascii=False) + "\n")
+    return path
+
+
 def load_results(runs_dir: str | Path) -> list[dict]:
     master = Path(runs_dir) / RESULTS_FILE
     if not master.exists():

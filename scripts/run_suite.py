@@ -37,6 +37,7 @@ def expand(suite_path: str) -> tuple[list[ExperimentConfig], dict]:
     models = load_yaml(ROOT / "configs" / "models.yaml").get("models", {})  # model -> {tier, size_b, family}
     teacher = suite.get("teacher")
     phase = suite.get("phase", 1)
+    overrides = suite.get("overrides", {})   # e.g. a smoke suite's small slice
     grid = suite.get("grid", {})
     keys = list(grid.keys())
 
@@ -66,6 +67,7 @@ def expand(suite_path: str) -> tuple[list[ExperimentConfig], dict]:
 
         cfg_dict = _deep_merge(base, {
             **arm_spec,
+            **overrides,
             "arm": arm,
             "model": model,
             "seed": d.get("seed", 0),
