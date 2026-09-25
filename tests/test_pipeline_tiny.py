@@ -58,6 +58,7 @@ def test_a5_end_to_end_logs_a_result(tmp_path, tiny_model):
     assert 0.0 <= res.exact_match <= 1.0 and res.n_examples == 2
     assert res.train_flops > 0 and res.infer_flops > 0
     assert res.extra["train"]["n_train"] == 2 and res.extra["train"]["global_steps"] == 4
+    assert res.extra["train"]["adapter_dtype"] == ["float32"]
 
     run_dir = runs / cfg.experiment_id
     assert (run_dir / "adapter" / "adapter_config.json").exists()
@@ -96,3 +97,31 @@ def test_pause_mid_training_then_resume_from_checkpoint(tmp_path, tiny_model, mo
     assert res is not None
     assert res.extra["train"]["resumed_from_step"] >= 1
     assert res.extra["train"]["global_steps"] == 4
+
+
+def test_lora_weights_stay_fp32_when_the_model_is_4bit(tmp_path, tiny_model):
+    # trl casts a quantized model's LoRA weights to bf16 when the trainer is built;
+    # the fp16 GradScaler on a T4 cannot unscale bf16 gradients. Flag the tiny
+    # model as 4-bit to take that code path, then apply ror.training's fix.
+    import torch
+    from datasets import Dataset
+    from peft import LoraConfig, get_peft_model
+    from trl import SFTConfig, SFTTrainer
+
+    from ror.models import load_student
+    from ror.training import _adapters_fp32
+
+    lm = load_student("qwen2.5-3b")
+    lm.model.is_loaded_in_4bit = True           # what a bitsandbytes 4-bit load sets
+    model = get_peft_model(lm.model, LoraConfig(r=4, target_modules=["q_proj"],
+                                                task_type="CAUSAL_LM"))
+    rec = {"prompt": [{"role": "user", "content": "1+1?"}],
+           "completion": [{"role": "assistant", "content": "2"}]}
+    trainer = SFTTrainer(model=model, processing_class=lm.tokenizer,
+                         train_dataset=Dataset.from_list([rec] * 2),
+                         args=SFTConfig(output_dir=str(tmp_path), use_cpu=True,
+                                        report_to="none", max_length=64))
+    trainable = [p for p in trainer.model.parameters() if p.requires_grad]
+    assert _adapters_fp32(trainer.model) >= 0
+    assert trainable and all(p.dtype == torch.float32 for p in trainable)
+    assert _adapters_fp32(trainer.model) == 0   # idempotent

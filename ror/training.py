@@ -122,6 +122,9 @@ def train_qlora(
         eval_dataset=Dataset.from_list(dev_recs) if dev_recs else None,
         callbacks=[budget],
     )
+    n_cast = _adapters_fp32(trainer.model)
+    if n_cast:
+        log.info("LoRA weights kept in fp32 (%d tensors cast back from trl's bf16)", n_cast)
     last = get_last_checkpoint(str(ckpt_dir)) if ckpt_dir.is_dir() else None
     start_step = _checkpoint_step(last)
     log.info("QLoRA: %s", f"resuming from {last}" if last else "starting fresh")
@@ -150,6 +153,8 @@ def train_qlora(
         "train_flops": training_flops(base.n_params, tokens_per_epoch * cfg.epochs),
         "lora_targets": LORA_TARGETS, "quantized": base.quantized,
         "compute_dtype": str(dtype).replace("torch.", ""),
+        "adapter_dtype": sorted({str(p.dtype).replace("torch.", "")
+                                 for p in trainer.model.parameters() if p.requires_grad}),
         "versions": library_versions(),
     }
     trainer.save_model(str(adapter_dir))
@@ -241,6 +246,25 @@ def _single_device(args: Any) -> Any:
         log.info("%d GPUs visible; the student trains on cuda:0 only", args.n_gpu)
         args._n_gpu = 1
     return args
+
+
+def _adapters_fp32(model: Any) -> int:
+    """Keep the trainable (LoRA) weights in fp32; returns how many were cast.
+
+    trl 1.14's SFTTrainer casts the trainable weights of a 4-bit model to bf16.
+    The T4 has no bf16, so training runs fp16 autocast with a GradScaler, whose
+    CUDA unscale kernel rejects bf16 gradients ("not implemented for
+    'BFloat16'"). fp32 adapters (peft's default) work under fp16 and bf16
+    autocast alike, so runs stay comparable across GPUs.
+    """
+    import torch
+
+    n = 0
+    for p in model.parameters():
+        if p.requires_grad and p.dtype != torch.float32:
+            p.data = p.data.float()
+            n += 1
+    return n
 
 
 def _check_budget(needed_s: float, why: str) -> None:

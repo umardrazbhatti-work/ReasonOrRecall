@@ -16,8 +16,8 @@ depend on them. Update this file as you go; it is the shared plan.
 - [x] `ror.experiment` — orchestration shell (plan → train? → infer → eval → log)
 - [x] `scripts/run_suite.py`, `run_experiment.py`, `aggregate_results.py`, `status.py`
 - [x] Tests for registry / sandbox / metrics
-- [ ] `pip install -e .`; run `pytest -q`; confirm all framework tests pass in Kaggle
-      (passes locally, 76 tests; `notebooks/kaggle_runner.ipynb` runs it on Kaggle)
+- [x] `pip install -e .`; run `pytest -q`; confirm all framework tests pass in Kaggle
+      (101/101 on the Kaggle T4x2 image, 2026-09-25)
 - [x] Code review of the scaffold: stub errors no longer burn registry attempts;
       results carry the full config; config identity/coercion fixes; metrics
       number parsing; sandbox blocks file/network/process access (proposal 5.4);
@@ -66,6 +66,8 @@ depend on them. Update this file as you go; it is the shared plan.
       before the session deadline (no attempt used), resume tested end-to-end
 - [x] Smoke suite `configs/suite_smoke.yaml` (64 train / 32 eval, own runs dir)
 - [ ] Smoke run passes on Kaggle T4; record tokens/s → decide epochs for the study
+      (Kaggle fixes so far: torchao 0.10 hidden from peft; no DataParallel across
+      the two T4s; LoRA weights kept fp32 after trl casts them to bf16)
 - [ ] Get **one** arm end-to-end: A5, Qwen2.5-3B, FinQA — logged in results.jsonl
 - [ ] Then A6, A7; then the size sweep (Qwen2.5-7B) and cross-family (Llama-3.1-8B)
 

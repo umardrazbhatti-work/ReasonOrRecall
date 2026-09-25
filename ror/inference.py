@@ -50,6 +50,9 @@ def generate(model: Any, cfg: ExperimentConfig, examples: list[Example]) -> list
     """
     if cfg.self_consistency_k > 1:
         raise NotImplementedError("self-consistency (k > 1) is not implemented yet")
+    if cfg.inference == "fewshot":
+        # without this, A2/A4 would silently run zero-shot under a few-shot label
+        raise NotImplementedError("few-shot inference (A2/A4): pass exemplars to build_messages")
     import torch
     from transformers import GenerationConfig
 

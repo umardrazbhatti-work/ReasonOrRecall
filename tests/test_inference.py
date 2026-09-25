@@ -40,3 +40,18 @@ def test_extracted_program_executes_in_sandbox():
 def test_strip_trailing_padding_only():
     assert _strip_trailing([5, 6, 0, 0], 0) == [5, 6]
     assert _strip_trailing([0, 5, 0], 0) == [0, 5]
+
+
+def test_unimplemented_decoding_modes_refuse_instead_of_mislabelling():
+    import pytest
+
+    from ror.config import ExperimentConfig
+    from ror.inference import generate
+
+    fewshot = ExperimentConfig(arm="A2", model="qwen2.5-3b", supervision="none",
+                               inference="fewshot")
+    with pytest.raises(NotImplementedError, match="few-shot"):
+        generate(model=None, cfg=fewshot, examples=[])     # before any model is touched
+    with pytest.raises(NotImplementedError, match="self-consistency"):
+        sc = ExperimentConfig(arm="A5", model="qwen2.5-3b", self_consistency_k=5)
+        generate(model=None, cfg=sc, examples=[])
