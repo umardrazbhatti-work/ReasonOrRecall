@@ -82,3 +82,43 @@ def test_restore_never_mixes_smoke_and_study_registries(tmp_path):
     _previous_output(tmp_path / "input" / "nb")            # a "runs" registry
     rep = restore_runs(tmp_path / "working" / "runs_smoke", roots=[tmp_path / "input"])
     assert rep["sources"] == [] and rep["files_copied"] == 0
+
+
+def test_session_verdict_reports_only_this_sessions_runs(tmp_path):
+    import time
+
+    from ror.kaggle import session_verdict
+
+    runs = _previous_output(tmp_path)                 # earlier session: done1, dead1
+    start = time.time()
+    reg = Registry(runs, max_attempts=2)
+    for exp_id in ("done1", "dead1"):
+        st = reg.load(exp_id)
+        st.last_update = start - 100
+        (runs / exp_id / "status.json").write_text(st.to_json())
+    reg.mark_running("new1", "A5-new")
+    reg.mark_failed("new1", "RuntimeError: Caught in replica 1\nTraceback ...\nRuntimeError: wrong device")
+    lines = session_verdict(runs, since=start)
+    assert len(lines) == 1 and lines[0].startswith("FAILED     A5-new (attempt 1/2")
+    assert lines[0].endswith("RuntimeError: wrong device")
+
+
+def test_pack_outputs_zips_everything_but_weights(tmp_path):
+    from ror.kaggle import pack_outputs
+
+    runs = _previous_output(tmp_path / "working")
+    (runs / "done1" / "adapter").mkdir(parents=True)
+    (runs / "done1" / "adapter" / "adapter_config.json").write_text("{}")
+    (runs / "done1" / "adapter" / "adapter_model.safetensors").write_text("big")
+    (runs / "done1" / "predictions.jsonl").write_text("{}\n")
+    log = tmp_path / "working" / "session_log.txt"
+    log.write_text("$ pytest\n")
+    first = pack_outputs(runs, extra_files=[log, tmp_path / "missing.lock"],
+                         dest_dir=tmp_path / "working")
+    z = pack_outputs(runs, extra_files=[log], dest_dir=tmp_path / "working")   # replaces it
+    assert list((tmp_path / "working").glob("ror-output_*.zip")) == [z]
+    assert z.name.startswith("ror-output_runs_") and first.parent == z.parent
+    names = set(zipfile.ZipFile(z).namelist())
+    assert {"session_log.txt", "runs/results.jsonl", "runs/done1/status.json",
+            "runs/done1/predictions.jsonl", "runs/done1/adapter/adapter_config.json"} <= names
+    assert not any(n.endswith(".safetensors") or "checkpoint" in n for n in names)

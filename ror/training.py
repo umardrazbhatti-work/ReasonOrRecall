@@ -114,6 +114,7 @@ def train_qlora(
         report_to="none",
         dataloader_num_workers=0,
     )
+    _single_device(args)
     budget = _time_budget_callback()
     trainer = SFTTrainer(
         model=model, args=args, processing_class=tok,
@@ -225,6 +226,21 @@ def _checkpoint_step(path: Optional[str]) -> int:
         return int(Path(path).name.split("-")[-1]) if path else 0
     except ValueError:
         return 0
+
+
+def _single_device(args: Any) -> Any:
+    """Train on the one GPU the student was loaded on.
+
+    With several GPUs visible (Kaggle T4x2) the HF Trainer wraps a model that
+    sits on a single device in nn.DataParallel (it exempts 8-bit models, not
+    4-bit ones): the replica on cuda:1 crashes, and the effective batch would be
+    multiplied by the GPU count. Forcing n_gpu=1 is what the Trainer does itself
+    for model-parallel models.
+    """
+    if args.n_gpu > 1:
+        log.info("%d GPUs visible; the student trains on cuda:0 only", args.n_gpu)
+        args._n_gpu = 1
+    return args
 
 
 def _check_budget(needed_s: float, why: str) -> None:

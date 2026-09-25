@@ -9,22 +9,29 @@ lives here so it is versioned and tested:
                       from a previous notebook version's output, so finished
                       experiments are never repeated and killed runs resume
   - gpu_summary       what accelerator this session got
+  - session_verdict   plain-language outcome of every run touched this session
+  - pack_outputs      one zip with everything needed to analyse the session
 """
 from __future__ import annotations
 
 import json
 import os
 import shutil
+import time
 import zipfile
 from pathlib import Path
 from typing import Iterable, Iterator, Optional
 
 from .paths import MANIFEST_NAME
-from .registry import Status
+from .registry import Registry, Status
 
 KAGGLE_INPUT = Path("/kaggle/input")
 KAGGLE_WORKING = Path("/kaggle/working")
 RESULTS_FILE = "results.jsonl"
+SESSION_LOG = "session_log.txt"     # the notebook tees every command's output here
+OUTPUT_ZIP_PREFIX = "ror-output_"
+# left out of the download zip: large, and kept in the version's output for resuming
+WEIGHT_SUFFIXES = {".safetensors", ".bin", ".pt", ".pth", ".ckpt"}
 
 
 def on_kaggle() -> bool:
@@ -202,6 +209,60 @@ def _mark_interrupted(status_file: Path) -> bool:
     st["last_error"] = "interrupted: the Kaggle session ended while running (restored)"
     status_file.write_text(json.dumps(st, indent=2, sort_keys=True), encoding="utf-8")
     return True
+
+
+def session_verdict(runs_dir: Path, since: float) -> list[str]:
+    """One plain-language line per experiment whose status changed at or after
+    `since` (the session start): completed, failed (with the error), paused."""
+    lines = []
+    for st in sorted(Registry(runs_dir).all_states(), key=lambda s: s.last_update):
+        if st.last_update < since:
+            continue
+        err = (st.last_error or "").strip().splitlines()
+        err = err[-1][:300] if err else ""
+        if st.status == Status.COMPLETED.value:
+            lines.append(f"COMPLETED  {st.name}")
+        elif st.status == Status.FAILED.value:
+            lines.append(f"FAILED     {st.name} (attempt {st.attempts}/{st.max_attempts}, "
+                         f"will be retried): {err}")
+        elif st.status == Status.PERMANENTLY_FAILED.value:
+            lines.append(f"FAILED     {st.name} (out of attempts, never retried): {err}")
+        elif st.status == Status.PENDING.value:
+            lines.append(f"NOT DONE   {st.name} (no attempt used): {err}")
+        else:
+            lines.append(f"{st.status.upper():10s} {st.name}")
+    return lines
+
+
+def pack_outputs(runs_dir: Path, extra_files: Iterable[Path] = (),
+                 dest_dir: Path = KAGGLE_WORKING) -> Path:
+    """Zip everything needed to analyse the session into one download.
+
+    Contents: `runs_dir/` (registry, results.jsonl, per-run logs, predictions,
+    train stats, adapter configs) and `extra_files` (session log,
+    requirements.lock) at the top level. Weights and training checkpoints are
+    left out: they are large and stay in the version's output for resuming.
+    Replaces an earlier zip from the same session. Returns the zip path.
+    """
+    runs_dir, dest_dir = Path(runs_dir), Path(dest_dir)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    for old in dest_dir.glob(f"{OUTPUT_ZIP_PREFIX}*.zip"):
+        old.unlink()
+    stamp = time.strftime("%Y%m%d-%H%M", time.gmtime())
+    out = dest_dir / f"{OUTPUT_ZIP_PREFIX}{runs_dir.name}_{stamp}.zip"
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
+        if runs_dir.is_dir():
+            for p in sorted(runs_dir.rglob("*")):
+                rel = p.relative_to(runs_dir)
+                if (p.is_file() and p.suffix not in WEIGHT_SUFFIXES and p.suffix != ".zip"
+                        and not any(part == "checkpoints" or part.startswith("checkpoint-")
+                                    for part in rel.parts)):
+                    zf.write(p, (Path(runs_dir.name) / rel).as_posix())
+        for f in extra_files:
+            f = Path(f)
+            if f.is_file():
+                zf.write(f, f.name)
+    return out
 
 
 def gpu_summary() -> str:
