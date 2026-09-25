@@ -145,7 +145,10 @@ and logged before scaling to the full suite.
 - Kaggle free tier: ~30 GPU-hours/week, ~9–12h sessions. **Checkpoint often**
   and make training resumable — a killed session must not lose a run.
 - Use the **T4×2** accelerator, not P100 (P100 lacks the 4-bit NF4 kernels QLoRA
-  needs).
+  needs). A ≤8B student trains and runs on `cuda:0` only: `ror.training` stops
+  the HF Trainer from wrapping it in `DataParallel` across both T4s (that
+  crashes with 4-bit weights and would double the effective batch). The second
+  T4 is for the ~32B teacher (`device_map="auto"`).
 - 4-bit QLoRA (NF4) via `bitsandbytes`; adapters via `peft`; SFT via `trl`.
 - Resolve exact library versions in the Kaggle image and commit a lockfile;
   `requirements.txt` lists compatible ranges, not exact pins.
