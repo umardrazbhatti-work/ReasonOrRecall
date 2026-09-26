@@ -58,6 +58,9 @@ def test_a5_end_to_end_logs_a_result(tmp_path, tiny_model):
     assert 0.0 <= res.exact_match <= 1.0 and res.n_examples == 2
     assert res.exact_match_strict is not None and res.exact_match_strict <= res.exact_match
     assert res.train_flops > 0 and res.infer_flops > 0
+    gpu = res.extra["gpu"]                                 # P1.6: GPU time for the cost
+    assert gpu["n_gpus"] == 0 and gpu["train_seconds"] > 0 and gpu["eval_seconds"] > 0
+    assert res.cost_usd is None                            # CPU: no priced GPU
     assert res.extra["train"]["n_train"] == 2 and res.extra["train"]["global_steps"] == 4
     assert res.extra["train"]["adapter_dtype"] == ["float32"]
 

@@ -47,7 +47,7 @@ class RunResult:
     infer_flops: Optional[float] = None
     wall_time_s: Optional[float] = None
     gpu: str = ""
-    cost_usd: float = 0.0
+    cost_usd: Optional[float] = None    # from GPU time x configs/pricing.yaml; None = unpriced
 
     # --- provenance ---
     git_commit: str = ""

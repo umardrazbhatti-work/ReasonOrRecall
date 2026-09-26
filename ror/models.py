@@ -81,6 +81,20 @@ def use_cuda() -> bool:
     return os.environ.get(DEVICE_ENV, "").lower() != "cpu" and torch.cuda.is_available()
 
 
+def gpus_used(model: Any) -> int:
+    """How many GPUs a loaded model sits on (for the cost of a run); 0 on CPU."""
+    if not use_cuda():
+        return 0
+    device_map = None
+    for m in (model, getattr(model, "base_model", None),
+              getattr(getattr(model, "base_model", None), "model", None)):
+        device_map = getattr(m, "hf_device_map", None) if m is not None else None
+        if device_map:
+            break
+    devices = {d for d in (device_map or {}).values() if d not in ("cpu", "disk")}
+    return max(1, len(devices))
+
+
 def compute_dtype() -> Any:
     """fp16 on pre-Ampere GPUs (the T4 has no bf16), bf16 on Ampere+, fp32 on CPU.
     (torch.cuda.is_bf16_supported() also reports emulated bf16, so check the

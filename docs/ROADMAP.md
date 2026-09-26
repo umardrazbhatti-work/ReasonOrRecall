@@ -71,7 +71,7 @@ Everything here changes metrics or experiment ids, so it must be settled first.
 - [x] **P1.3 (M) Checkpoint selection = the proposal's early stopping** (amendment M2): 1 epoch; dev evaluation on 200 fixed dev items at 4 evenly spaced checkpoints; keep the best by dev EM (tie-break: faithfulness for program arms); curve logged. Done when: tested on the tiny model; the dev curve appears in the report.
 - [ ] **P1.4 (M) Throughput pilot** on Kaggle (≤3 GPU-h): batch 1×16 vs 4×4 grouped by length, gradient checkpointing on/off for 3B; pick the fastest that fits memory. Effective batch stays 16. Done when: chosen setting in `configs/base.yaml`, measured tok/s recorded.
 - [x] **P1.5 (M) Statistics** (`ror/stats.py`): 95% bootstrap CIs for EM, gaps and faithfulness; paired bootstrap / McNemar for arm-vs-arm on the same items; Holm correction per hypothesis family. In aggregation and report. Done when: tested; CIs visible in the report.
-- [ ] **P1.6 (S) Dollar convention** (`configs/pricing.yaml`): $/GPU-hour per hardware (source + date) and API $/token → `cost_usd` per run → per-dollar frontier. Done when: nonzero `cost_usd` in a test run.
+- [x] **P1.6 (S) Dollar convention** (`configs/pricing.yaml`, `ror/costs.py`): runs log GPU-seconds (training over all sessions + selection, answering) and GPU count; `cost_usd` = GPU-hours × $/GPU-hour, computed at analysis time. Prices (with source and date) are filled in P7.3 (decision D3). Done when: cost computed in a test.
 - [ ] **P1.7 (M) Final experiment matrix** as suites per phase (`suite_p3_3b.yaml`, `suite_p4_32b.yaml`, `suite_p5_scale.yaml`) with the priorities of section 4; the dry-run prints the plan and its GPU-hour estimate.
 - [ ] **P1.8 (M) Desk check:** did arXiv:2408.12337 [4] release its traces, and under what license? Decides P4.3 (reuse vs generate).
 - [ ] **P1.9 (M) `docs/PROTOCOL.md`**: a pre-registration of RQs, hypotheses, splits, metrics, matching rule, selection rule, seeds, statistical tests and the decision rules of this roadmap. Approved by you (ideally shown to your supervisor).
@@ -132,7 +132,7 @@ Every trained run: train once (1 epoch, best of 4 dev checks), then evaluate on 
 ### P7 — Analysis and results freeze  *(no GPU)*
 - [ ] **P7.1 (M)** RQ1–RQ4 and H1–H4 answered with 95% CIs and the tests in PROTOCOL.md.
 - [ ] **P7.2 (M)** Gap decomposition: standard → control (question style) → clean (recency/contamination), per model class.
-- [ ] **P7.3 (M)** Compute-matched frontier (FLOP and dollar), standard vs clean.
+- [ ] **P7.3 (M)** Compute-matched frontier (FLOP and dollar), standard vs clean; first fill `configs/pricing.yaml` from dated public price lists (D3).
 - [ ] **P7.4 (M)** Error analysis and sanity pass: no missing arm, every number traceable to a run.
 - [ ] **P7.5 (M)** Results frozen: git tag `results-tier1`; the paper's tables and figures generated from it.
 
@@ -319,6 +319,7 @@ whole plan fits the proposal's 12 weeks.
 |---|---|---|---|
 | D1 | 2026-09-25 | `max_seq_len` 2048 (longer training items dropped, eval never truncated) | yes (you) |
 | D2 | 2026-09-26 | Roadmap v1.0 with amendments M1–M8 and additions A1–A7 | yes (you) |
+| D3 | 2026-09-26 | P1.6: runs log GPU time now; $/GPU-hour prices are filled in P7.3 from dated price lists (costs are computed at analysis time, so no re-runs) | pending |
 
 ---
 

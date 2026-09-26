@@ -234,6 +234,17 @@ def _execute(cfg: ExperimentConfig, run_dir: Path) -> RunResult:
     result.extra["decoding"] = inference.decoding_settings(cfg)
     result.extra["timing_s"] = {"model_and_training": round(t1 - t0, 1),
                                 "inference": round(t2 - t1, 1)}
+    trained = cfg.arm in _TRAINED_ARMS
+    result.extra["gpu"] = {
+        "n_gpus": models.gpus_used(model.model),
+        "train_seconds": float((getattr(model, "train_stats", None) or {})
+                               .get("train_gpu_seconds") or 0.0) if trained else 0.0,
+        "eval_seconds": round((t2 - t1) + (0.0 if trained else t1 - t0), 1),
+    }
+    from .costs import run_cost
+
+    cost = run_cost({"gpu": gpu_name(), "extra": result.extra})
+    result.cost_usd = cost["total"] if cost else None
     result.extra["versions"] = library_versions()
     return result
 

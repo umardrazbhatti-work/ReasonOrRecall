@@ -1,0 +1,20 @@
+# Prices for the per-dollar frontier (proposal §5.6; roadmap P1.6, P7.3).
+#
+# Runs log the GPU-seconds they used (training across all sessions, checkpoint
+# selection, answering) and how many GPUs; ror.costs turns that into dollars at
+# analysis time with the prices below. So prices can be set or corrected later
+# without re-running anything.
+#
+# Matching: a price applies to a run whose GPU name (torch.cuda.get_device_name,
+# e.g. "Tesla T4") contains the key. Fill `usd_per_gpu_hour` from the provider's
+# public on-demand price list and record `source` + `date` (roadmap P7.3).
+# null = not priced yet (cost reported as unknown, never as 0).
+gpus:
+  T4:
+    usd_per_gpu_hour: null
+    source: ""
+    date: ""
+  A100:
+    usd_per_gpu_hour: null
+    source: "actual rental price paid in P8 (Tier 2)"
+    date: ""

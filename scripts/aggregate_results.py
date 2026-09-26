@@ -25,6 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from ror.config import IDENTITY_FIELDS  # noqa: E402
+from ror.costs import load_pricing, run_cost  # noqa: E402
 from ror.results import load_results  # noqa: E402
 from ror.stats import bootstrap_diff_ci, bootstrap_mean_ci, item_scores, seed_sd  # noqa: E402
 
@@ -87,6 +88,7 @@ def aggregate(rows: list[dict], items: dict[str, dict] | None = None
     over test items (each item's mean correctness across seeds), and for the gap
     (standard and clean resampled separately)."""
     items = items or {}
+    pricing = load_pricing()
     buckets: dict[tuple, list[dict]] = defaultdict(list)
     for r in dedupe(rows):
         key = (r.get("dataset", "finqa"), r["arm"], r["model"], _variant(r), r["split"])
@@ -100,7 +102,7 @@ def aggregate(rows: list[dict], items: dict[str, dict] | None = None
                "model_size_b": rs[0].get("model_size_b"),
                "train_flops": _avg([r.get("train_flops") for r in rs]),
                "infer_flops": _avg([r.get("infer_flops") for r in rs]),
-               "cost_usd": _avg([r.get("cost_usd") for r in rs])}
+               "cost_usd": _avg([_cost(r, pricing) for r in rs])}
         for m in METRICS:
             rec[m] = _avg([r.get(m) for r in rs])
         sd = seed_sd([r.get("exact_match") for r in rs])
@@ -147,6 +149,12 @@ def aggregate(rows: list[dict], items: dict[str, dict] | None = None
     ]
     order = lambda r: (r["dataset"], r["arm"], r["model"], r["variant"])  # noqa: E731
     return sorted(table.values(), key=order), frontier
+
+
+def _cost(row: dict, pricing: dict):
+    """USD from the run's GPU time and configs/pricing.yaml (None if unpriced)."""
+    c = run_cost(row, pricing)
+    return c["total"] if c else row.get("cost_usd")
 
 
 def _avg(vals):

@@ -41,6 +41,7 @@ LORA_TARGETS = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", 
 SAVE_STEPS = 50                   # ~20 min of T4 time for the full A5 run
 WARMUP_FRACTION = 0.03            # of total optimizer steps (linear warmup, then cosine)
 TRAIN_DONE = "train_done.json"    # training finished; checkpoint selection pending
+GPU_SECONDS = "gpu_seconds.json"  # training + selection GPU time summed over sessions
 SELECTION_DIR = "selection"       # adapter copies at the selection steps (step-N/)
 LOG_POINTS = 50                   # training-curve points logged per run (for the report)
 ADAPTERS_DIR = "_adapters"        # <runs>/_adapters/<training_id>/ (no status.json: not an experiment)
@@ -92,6 +93,7 @@ def train_qlora(
     _check_budget(MIN_SELECTION_S, "trained; not enough session time left to select "
                                    "the checkpoint")
     stats["selection"] = _select_checkpoint(cfg, home)
+    stats["train_gpu_seconds"] = _add_gpu_seconds(home, stats["selection"]["seconds"])
     stats_path.write_text(json.dumps(stats, indent=2), encoding="utf-8")
     shutil.rmtree(home / SELECTION_DIR, ignore_errors=True)   # the chosen one is in adapter/
     done_path.unlink(missing_ok=True)
@@ -193,6 +195,7 @@ def _train(cfg: ExperimentConfig, examples_train: list[Example], home: Path) -> 
     t0 = time.time()
     out = trainer.train(resume_from_checkpoint=last)
     runtime = time.time() - t0
+    _add_gpu_seconds(home, runtime)             # also for a paused session
     if budget.paused:
         raise RunPaused(f"session time budget reached at step {trainer.state.global_step}"
                         f"/{trainer.state.max_steps}; resumes from {ckpt_dir}")
@@ -466,6 +469,15 @@ def _free_memory() -> None:
             torch.cuda.empty_cache()
     except ImportError:
         pass
+
+
+def _add_gpu_seconds(home: Path, seconds: float) -> float:
+    """Add to the adapter's GPU time (all sessions); return the new total."""
+    path = home / GPU_SECONDS
+    total = json.loads(path.read_text(encoding="utf-8"))["seconds"] if path.exists() else 0.0
+    total = round(total + float(seconds), 1)
+    path.write_text(json.dumps({"seconds": total}), encoding="utf-8")
+    return total
 
 
 def _link(run_dir: Path, home: Path, cfg: ExperimentConfig, reused: bool) -> None:
