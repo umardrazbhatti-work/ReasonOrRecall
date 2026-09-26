@@ -66,6 +66,10 @@ def test_a5_end_to_end_logs_a_result(tmp_path, tiny_model):
     assert (home / "adapter" / "adapter_config.json").exists()
     assert not (home / "checkpoints").exists()           # removed once the adapter exists
     assert json.loads((run_dir / "training.json").read_text())["reused"] is False
+    sel = res.extra["train"]["selection"]                 # P1.3: best of 4 dev checks
+    assert [c["step"] for c in sel["checks"]] == [1, 2, 3, 4]
+    assert sel["chosen_step"] in (1, 2, 3, 4) and sel["dev_examples"] == 2
+    assert not (home / "selection").exists() and not (home / "train_done.json").exists()
     rows = [json.loads(line) for line in
             (run_dir / "predictions.jsonl").read_text(encoding="utf-8").splitlines()]
     assert len(rows) == 2 and {"uid", "gold", "pred", "correct", "text"} <= set(rows[0])
@@ -150,3 +154,41 @@ def test_trained_once_and_evaluated_on_another_split(tmp_path, tiny_model, monke
     assert res.train_flops == res.extra["train"]["train_flops"] > 0   # still costs its training
     assert len(list((runs / "_adapters").iterdir())) == 1
     assert Registry(runs).load(other.experiment_id).status == Status.COMPLETED.value
+
+
+def test_selection_steps_are_even_and_end_at_the_last_step():
+    from ror.training import selection_steps
+
+    assert selection_steps(385, 4) == [97, 194, 291, 385]
+    assert selection_steps(4, 4) == [1, 2, 3, 4]
+    assert selection_steps(3, 4) == [1, 2, 3]
+    assert selection_steps(10, 1) == [10]
+
+
+def test_session_ending_between_training_and_selection(tmp_path, tiny_model, monkeypatch):
+    # training finishes, too little time is left to select: pause (no attempt used);
+    # the next session selects without retraining
+    import time
+
+    import ror.training as training
+    from ror.experiment import run_experiment
+
+    runs = tmp_path / "runs"
+    cfg = _cfg(epochs=1)
+    monkeypatch.setenv("ROR_DEADLINE_UNIX", str(time.time() + 3600))
+    monkeypatch.setattr(training, "TRAIN_STOP_RESERVE_S", 0)
+    monkeypatch.setattr(training, "MIN_SELECTION_S", 7200)
+    assert run_experiment(cfg, runs_dir=runs) is None
+    st = Registry(runs).load(cfg.experiment_id)
+    assert st.status == Status.PENDING.value and st.attempts == 0 and "select" in st.last_error
+    home = runs / "_adapters" / cfg.training_id
+    assert (home / "train_done.json").exists() and list((home / "selection").iterdir())
+
+    monkeypatch.delenv("ROR_DEADLINE_UNIX")
+
+    def must_not_train(*a, **k):
+        raise AssertionError("retrained after training had finished")
+
+    monkeypatch.setattr(training, "build_sft_records", must_not_train)
+    res = run_experiment(cfg, runs_dir=runs)
+    assert res is not None and res.extra["train"]["selection"]["chosen_step"] in (1, 2)

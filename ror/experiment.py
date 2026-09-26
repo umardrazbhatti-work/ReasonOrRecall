@@ -43,15 +43,19 @@ def build_plan(cfg: ExperimentConfig) -> list[str]:
             f"train: QLoRA {cfg.model} on {cfg.dataset} "
             f"(supervision={cfg.supervision}, epochs={cfg.epochs}, r={cfg.lora_r}, "
             f"max_seq_len={cfg.max_seq_len}, "
-            f"examples={cfg.train_examples or 'all'})"
+            f"examples={cfg.train_examples or 'all'}) -> adapter {cfg.training_id} "
+            f"(trained once, reused by every split)"
         )
+        steps.append(f"  select: best of {cfg.selection_checks} checkpoints by dev EM on "
+                     f"{cfg.dev_examples} dev items (then faithfulness, then earlier step)")
         if cfg.supervision == "pot_distilled":
             steps.append(f"  uses distilled traces from teacher={cfg.teacher}")
     else:
         steps.append(f"no training (arm {cfg.arm}, inference={cfg.inference})")
     steps.append(f"infer on split={cfg.split} ({cfg.eval_examples or 'all'} examples), "
                  f"k={cfg.self_consistency_k}")
-    steps.append("evaluate: exact_match, execution_accuracy, faithfulness, executability")
+    steps.append("evaluate: exact_match (primary rule; strict alongside), execution_accuracy, "
+                 "faithfulness, executability")
     steps.append("log RunResult -> runs/results.jsonl")
     return steps
 

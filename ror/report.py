@@ -400,7 +400,7 @@ def fig_scorecard(plt, run: dict, items: list[dict], arm_note: str, path: Path) 
               f"{n_ok} of {n} test questions" + (f"; strict {_pct(strict)}"
                                                  if strict is not None else ""))]
     if tr:
-        ev = tr.get("eval_loss_by_epoch") or []
+        ev = [d["loss"] for d in tr.get("dev_loss") or []] or tr.get("eval_loss_by_epoch") or []
         tiles.append(("Loss", f"{tr.get('train_loss', float('nan')):.2f}"
                       + (f" -> {ev[-1]:.2f}" if ev else ""),
                       "training average -> dev set" if ev else "training average"))
@@ -434,21 +434,51 @@ def fig_scorecard(plt, run: dict, items: list[dict], arm_note: str, path: Path) 
 
 
 def fig_training_curve(plt, run: dict, path: Path) -> Optional[Path]:
-    hist = run["_train"].get("log_history") or []
+    tr = run["_train"]
+    hist = tr.get("log_history") or []
     train = [(h["step"], h["loss"]) for h in hist if "loss" in h and "step" in h]
-    evals = [(h["step"], h["eval_loss"]) for h in hist if "eval_loss" in h and "step" in h]
-    if len(train) < 2:
+    evals = ([(d["step"], d["loss"]) for d in tr.get("dev_loss") or []]
+             or [(h["step"], h["eval_loss"]) for h in hist if "eval_loss" in h and "step" in h])
+    selection = tr.get("selection") or {}
+    checks = selection.get("checks") or []
+    if len(train) < 2 and not checks:
         return None
-    fig, ax = _figure(plt, "Training loss",
-                      "Loss on the answer tokens per optimizer step; dots = dev-set loss "
-                      "at the end of each epoch. Lower is better.")
-    ax.plot(*zip(*train), color=SERIES[0], linewidth=2, label="training")
+    if checks:
+        fig, (ax, a2) = _figure(plt, "Training and checkpoint selection",
+                                "Left: loss on the answer tokens per step; dots = dev-set "
+                                "loss. Right: dev exact match of each kept checkpoint; the "
+                                "ringed one is used.", ncols=2)
+    else:
+        fig, ax = _figure(plt, "Training loss",
+                          "Loss on the answer tokens per optimizer step; dots = dev-set "
+                          "loss. Lower is better.")
+    if len(train) >= 2:
+        ax.plot(*zip(*train), color=SERIES[0], linewidth=2, label="training")
     if evals:
         ax.plot(*zip(*evals), linestyle="none", marker="o", markersize=7, color=SERIES[1],
                 markeredgecolor=SURFACE, markeredgewidth=1.5, label="dev set")
         ax.legend(loc="upper right")
     ax.set_xlabel("optimizer step")
     ax.set_ylabel("loss")
+    if checks:
+        steps = [c["step"] for c in checks]
+        ems = [c["dev_em"] for c in checks]
+        a2.plot(steps, ems, color=SERIES[0], linewidth=2, marker="o", markersize=7,
+                markeredgecolor=SURFACE, markeredgewidth=1.5)
+        chosen = selection.get("chosen_step")
+        if chosen in steps:
+            y = ems[steps.index(chosen)]
+            a2.plot([chosen], [y], marker="o", markersize=15, markerfacecolor="none",
+                    markeredgecolor=INK, markeredgewidth=1.5)
+            a2.annotate(f"kept: {_pct(y)}", (chosen, y), textcoords="offset points",
+                        xytext=(0, 12), ha="center", fontsize=8.5, color=INK2)
+        a2.set_ylim(0, 1.0)
+        from matplotlib.ticker import PercentFormatter
+
+        a2.set_yticks([0, 0.25, 0.5, 0.75, 1.0])
+        a2.yaxis.set_major_formatter(PercentFormatter(1.0, decimals=0))
+        a2.set_xlabel("optimizer step")
+        a2.set_title("dev exact match")
     return _save(plt, fig, path)
 
 
@@ -789,7 +819,7 @@ def fig_status(plt, counts: Counter, path: Path) -> Optional[Path]:
 
 CAPTIONS = {
     "01": "Headline numbers of the latest completed experiment.",
-    "02": "Training loss per step, with the dev-set loss after each epoch.",
+    "02": "Training loss per step with dev loss, and the dev accuracy of each kept checkpoint.",
     "03": "Learning-rate schedule and gradient norm.",
     "04": "Model answer against the correct answer for every numeric question.",
     "05": "What happened to each answer.",

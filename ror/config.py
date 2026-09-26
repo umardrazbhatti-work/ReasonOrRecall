@@ -38,6 +38,8 @@ IDENTITY_FIELDS = (
     "train_examples",
     "eval_examples",
     "epochs",
+    "selection_checks",
+    "dev_examples",
     "lora_r",
     "lora_alpha",
     "lora_dropout",
@@ -64,6 +66,8 @@ TRAINING_FIELDS = (
     "teacher",
     "train_examples",
     "epochs",
+    "selection_checks",
+    "dev_examples",
     "lora_r",
     "lora_alpha",
     "lora_dropout",
@@ -91,7 +95,9 @@ class ExperimentConfig:
     # --- training hyperparameters (identity-affecting) ---
     train_examples: Optional[int] = None  # None = all (else a seeded sample)
     eval_examples: Optional[int] = None   # None = all (else the first N; smoke runs)
-    epochs: int = 3
+    epochs: int = 1                       # roadmap M2: 1 epoch + checkpoint selection
+    selection_checks: int = 4             # dev evaluations within training; best is kept
+    dev_examples: int = 200               # fixed dev slice for selection and dev loss
     lora_r: int = 16
     lora_alpha: int = 32
     lora_dropout: float = 0.05

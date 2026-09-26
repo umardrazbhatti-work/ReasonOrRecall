@@ -7,7 +7,9 @@ defaults:
   max_attempts: 2
 
   # training (QLoRA) — identity-affecting
-  epochs: 3
+  epochs: 1                  # M2: 1 epoch; the best of `selection_checks` checkpoints is kept
+  selection_checks: 4        # dev-set evaluations spread evenly over training (early stopping)
+  dev_examples: 200          # fixed dev slice for checkpoint selection and dev loss
   lora_r: 16
   lora_alpha: 32
   lora_dropout: 0.05

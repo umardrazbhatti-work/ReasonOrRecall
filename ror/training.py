@@ -40,11 +40,13 @@ log = get_logger("ror.training")
 LORA_TARGETS = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
 SAVE_STEPS = 50                   # ~20 min of T4 time for the full A5 run
 WARMUP_FRACTION = 0.03            # of total optimizer steps (linear warmup, then cosine)
-DEV_EVAL_EXAMPLES = 200           # fixed dev slice for per-epoch eval loss
+TRAIN_DONE = "train_done.json"    # training finished; checkpoint selection pending
+SELECTION_DIR = "selection"       # adapter copies at the selection steps (step-N/)
 LOG_POINTS = 50                   # training-curve points logged per run (for the report)
 ADAPTERS_DIR = "_adapters"        # <runs>/_adapters/<training_id>/ (no status.json: not an experiment)
 TRAIN_STOP_RESERVE_S = 45 * 60    # stop training this long before the deadline
-MIN_INFERENCE_S = 20 * 60         # after training, pause if less time than this is left
+MIN_SELECTION_S = 35 * 60         # after training, pause before selection if less is left
+MIN_INFERENCE_S = 20 * 60         # after selection, pause before inference if less is left
 
 
 def train_qlora(
@@ -53,11 +55,19 @@ def train_qlora(
     run_dir: str | Path,
 ) -> LoadedModel:
     """Fine-tune a student with QLoRA under cfg.supervision and return it, loaded
-    with the trained adapter and ready for `ror.inference.generate`.
+    with the selected adapter and ready for `ror.inference.generate`.
+
+    Two stages, each resumable across Kaggle sessions:
+      1. training (`_train`): 1 epoch by default; a copy of the adapter is kept
+         at `cfg.selection_checks` evenly spaced steps; a TRAIN_DONE marker
+         records the finished training;
+      2. checkpoint selection (`_select_checkpoint`), the proposal's early
+         stopping (roadmap M2): every kept checkpoint answers the dev slice
+         through the same `generate` as the test set; the best by primary EM
+         (then faithfulness, then the earlier step) becomes the adapter.
 
     The adapter lives in `training_dir(cfg, run_dir)`: a finished one is reused
-    (another split of the same training, or a retry after a later step failed);
-    otherwise training resumes from the latest checkpoint there, if any.
+    (another split of the same training, or a retry after a later step failed).
     """
     run_dir = Path(run_dir)
     home = training_dir(cfg, run_dir)
@@ -67,9 +77,39 @@ def train_qlora(
         log.info("adapter %s already trained, reusing it", cfg.training_id)
         _link(run_dir, home, cfg, reused=True)
         return _load_trained(cfg, adapter_dir, stats_path, reused=True)
-    _check_budget(TRAIN_STOP_RESERVE_S, "not enough session time left to train")
-    home.mkdir(parents=True, exist_ok=True)
 
+    done_path = home / TRAIN_DONE
+    if done_path.exists():
+        stats = json.loads(done_path.read_text(encoding="utf-8"))
+        log.info("training %s finished in an earlier session; selecting the checkpoint",
+                 cfg.training_id)
+    else:
+        _check_budget(TRAIN_STOP_RESERVE_S, "not enough session time left to train")
+        home.mkdir(parents=True, exist_ok=True)
+        stats = _train(cfg, examples_train, home)          # raises RunPaused near the deadline
+        done_path.write_text(json.dumps(stats, indent=2), encoding="utf-8")
+
+    _check_budget(MIN_SELECTION_S, "trained; not enough session time left to select "
+                                   "the checkpoint")
+    stats["selection"] = _select_checkpoint(cfg, home)
+    stats_path.write_text(json.dumps(stats, indent=2), encoding="utf-8")
+    shutil.rmtree(home / SELECTION_DIR, ignore_errors=True)   # the chosen one is in adapter/
+    done_path.unlink(missing_ok=True)
+    _link(run_dir, home, cfg, reused=False)
+    _check_budget(MIN_INFERENCE_S, "trained; not enough session time left for inference")
+    return _load_trained(cfg, adapter_dir, stats_path, reused=False)
+
+
+def selection_steps(total_steps: int, checks: int) -> list[int]:
+    """Evenly spaced optimizer steps at which a checkpoint is kept for
+    selection; the last step is always one of them."""
+    interval = max(1, math.ceil(total_steps / max(1, checks)))
+    return sorted({min(k * interval, total_steps) for k in range(1, max(1, checks) + 1)})
+
+
+def _train(cfg: ExperimentConfig, examples_train: list[Example], home: Path) -> dict:
+    """Run (or resume) the QLoRA training in `home`; keep an adapter copy at each
+    selection step in home/selection/step-N; return the training stats."""
     import torch
     from datasets import Dataset
     from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
@@ -100,6 +140,8 @@ def train_qlora(
     ckpt_dir = home / "checkpoints"
     steps_per_epoch = math.ceil(len(train_recs) / (cfg.batch_size * cfg.grad_accum))
     total_steps = steps_per_epoch * cfg.epochs
+    checks = selection_steps(total_steps, cfg.selection_checks)
+    log.info("checkpoint selection at steps %s of %d", checks, total_steps)
     args = SFTConfig(
         output_dir=str(ckpt_dir),
         num_train_epochs=cfg.epochs,
@@ -114,7 +156,7 @@ def train_qlora(
         save_strategy="steps",
         save_steps=SAVE_STEPS,
         save_total_limit=2,
-        eval_strategy="epoch" if dev_recs else "no",
+        eval_strategy="no",           # dev loss is evaluated at the selection steps (callback)
         gradient_checkpointing=True,
         gradient_checkpointing_kwargs={"use_reentrant": False},
         fp16=use_cuda() and dtype == torch.float16,
@@ -131,11 +173,12 @@ def train_qlora(
     )
     _single_device(args)
     budget = _time_budget_callback()
+    keeper = _selection_callback(set(checks), home / SELECTION_DIR, evaluate=bool(dev_recs))
     trainer = SFTTrainer(
         model=model, args=args, processing_class=tok,
         train_dataset=Dataset.from_list(train_recs),
         eval_dataset=Dataset.from_list(dev_recs) if dev_recs else None,
-        callbacks=[budget],
+        callbacks=[budget, keeper],
     )
     n_cast = _adapters_fp32(trainer.model)
     if n_cast:
@@ -161,10 +204,11 @@ def train_qlora(
         "n_train": len(train_recs), "n_dropped_too_long": n_dropped,
         "n_dev": len(dev_recs), "train_tokens_per_epoch": tokens_per_epoch,
         "epochs": cfg.epochs, "global_steps": trainer.state.global_step,
+        "selection_steps": checks,
         "resumed_from_step": start_step,
         "train_loss": out.training_loss,
-        "eval_loss_by_epoch": [h["eval_loss"] for h in trainer.state.log_history
-                               if "eval_loss" in h],
+        "dev_loss": [{"step": h["step"], "loss": h["eval_loss"]}
+                     for h in trainer.state.log_history if "eval_loss" in h],
         "train_runtime_s_this_session": runtime,
         "tokens_per_s": tokens_per_step * steps_now / runtime if runtime > 0 else None,
         "train_flops": training_flops(base.n_params, tokens_per_epoch * cfg.epochs),
@@ -178,17 +222,65 @@ def train_qlora(
         "log_history": _curve(trainer.state.log_history),
         "versions": library_versions(),
     }
-    trainer.save_model(str(adapter_dir))
-    stats_path.write_text(json.dumps(stats, indent=2), encoding="utf-8")
-    shutil.rmtree(ckpt_dir, ignore_errors=True)  # the adapter is the product
-    _link(run_dir, home, cfg, reused=False)
+    missing = [s for s in checks if not (home / SELECTION_DIR / f"step-{s}").is_dir()]
+    if missing:
+        raise RuntimeError(f"selection checkpoints missing for steps {missing}")
+    shutil.rmtree(ckpt_dir, ignore_errors=True)   # resume state; the adapters are kept
     log.info("trained: loss %.4f, %d steps, %.0f tok/s", out.training_loss,
              trainer.state.global_step, stats["tokens_per_s"] or 0)
-
     del trainer, model, base
     _free_memory()
-    _check_budget(MIN_INFERENCE_S, "trained; not enough session time left for inference")
-    return _load_trained(cfg, adapter_dir, stats_path, reused=False)
+    return stats
+
+
+def _select_checkpoint(cfg: ExperimentConfig, home: Path) -> dict:
+    """Answer the dev slice with every kept checkpoint (same `generate` and
+    metrics as the test set) and copy the best to home/adapter. Best = highest
+    primary EM, then faithfulness (program arms), then the earlier step."""
+    from .faithfulness import program_faithfulness
+    from .inference import generate, to_faith_items
+    from .metrics import exact_match, primary_exact_match
+
+    kept = sorted((home / SELECTION_DIR).glob("step-*"), key=lambda d: int(d.name[5:]))
+    if not kept:
+        raise RuntimeError(f"no selection checkpoints in {home / SELECTION_DIR}")
+    dev = _dev_examples(cfg)
+    t0 = time.time()
+    rows: list[dict] = []
+    if dev:
+        lm = load_student(cfg.model, adapter_dir=kept[0])
+        golds = [ex.answer for ex in dev]
+        for i, d in enumerate(kept):
+            step = int(d.name[5:])
+            if i:
+                name = d.name.replace("-", "_")
+                lm.model.load_adapter(str(d), adapter_name=name)
+                lm.model.set_adapter(name)
+            preds = generate(lm, cfg, dev)
+            answers = [p.answer for p in preds]
+            faith = (program_faithfulness(to_faith_items(preds, golds))
+                     if any(p.program for p in preds) else None)
+            rows.append({"step": step,
+                         "dev_em": primary_exact_match(answers, golds,
+                                                       [p.percent_form for p in preds]),
+                         "dev_em_strict": exact_match(answers, golds),
+                         "dev_faithfulness": faith})
+            log.info("selection: step %d dev EM %.3f%s", step, rows[-1]["dev_em"],
+                     "" if faith is None else f", faithfulness {faith:.3f}")
+        del lm
+        _free_memory()
+        best = max(rows, key=lambda r: (r["dev_em"], r["dev_faithfulness"] or 0.0, -r["step"]))
+        chosen = best["step"]
+    else:
+        chosen = int(kept[-1].name[5:])          # no dev data: the final checkpoint
+    dst = home / "adapter"
+    shutil.rmtree(dst, ignore_errors=True)
+    shutil.copytree(home / SELECTION_DIR / f"step-{chosen}", dst)
+    log.info("selected checkpoint: step %d (checked %s)", chosen,
+             [r["step"] for r in rows] or [chosen])
+    return {"checks": rows, "chosen_step": chosen, "dev_examples": len(dev),
+            "rule": "max primary dev EM, then dev faithfulness, then earlier step",
+            "seconds": round(time.time() - t0, 1)}
 
 
 def training_dir(cfg: ExperimentConfig, run_dir: str | Path) -> Path:
@@ -265,10 +357,10 @@ def _curve(log_history: list[dict]) -> list[dict]:
 
 
 def _dev_examples(cfg: ExperimentConfig) -> list[Example]:
-    """A fixed dev slice for eval loss (smaller for smoke runs)."""
-    n = DEV_EVAL_EXAMPLES if not cfg.train_examples else max(8, cfg.train_examples // 4)
+    """The fixed dev slice (first cfg.dev_examples items) for checkpoint selection
+    and dev loss."""
     try:
-        return load_dataset(cfg.dataset, "dev")[:n]
+        return load_dataset(cfg.dataset, "dev")[:cfg.dev_examples]
     except FileNotFoundError:
         return []
 
@@ -318,6 +410,30 @@ def _check_budget(needed_s: float, why: str) -> None:
     left = seconds_left()
     if left is not None and left < needed_s:
         raise RunPaused(f"{why} ({left / 60:.0f} min left, need {needed_s / 60:.0f})")
+
+
+def _selection_callback(steps: set, keep_dir: Path, evaluate: bool) -> Any:
+    """Trainer callback: save a checkpoint at each selection step, copy its
+    adapter files to keep_dir/step-N, and evaluate the dev loss there."""
+    from transformers import TrainerCallback
+
+    class SelectionKeeper(TrainerCallback):
+        def on_step_end(self, args, state, control, **kwargs):  # noqa: ANN001
+            if state.global_step in steps:
+                control.should_save = True
+                control.should_evaluate = evaluate
+            return control
+
+        def on_save(self, args, state, control, **kwargs):  # noqa: ANN001
+            if state.global_step in steps:
+                src = Path(args.output_dir) / f"checkpoint-{state.global_step}"
+                dst = keep_dir / f"step-{state.global_step}"
+                dst.mkdir(parents=True, exist_ok=True)
+                for f in src.glob("adapter_*"):
+                    shutil.copy2(f, dst / f.name)
+            return control
+
+    return SelectionKeeper()
 
 
 def _time_budget_callback() -> Any:

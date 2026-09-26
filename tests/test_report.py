@@ -67,7 +67,10 @@ def make_runs(root: Path) -> Path:
                   "gen_tokens": 5 + i % 3} for i in range(12)]
         (d / "predictions.jsonl").write_text("".join(json.dumps(p) + "\n" for p in preds))
         train = {"n_train": 100, "epochs": 2, "global_steps": 12, "train_loss": 1.2,
-                 "tokens_per_s": 300.0, "eval_loss_by_epoch": [1.1, 0.9],
+                 "tokens_per_s": 300.0,
+                 "dev_loss": [{"step": 6, "loss": 1.1}, {"step": 12, "loss": 0.9}],
+                 "selection": {"checks": [{"step": s, "dev_em": 0.2 + 0.05 * s / 3}
+                                          for s in (3, 6, 9, 12)], "chosen_step": 12},
                  "train_runtime_s_this_session": 600.0, "peak_gpu_mem_gb": 6.1,
                  "log_history": [{"step": s, "loss": 2.0 - 0.1 * s, "learning_rate": 2e-4 * s / 12,
                                   "grad_norm": 1.0 + 0.1 * s} for s in range(1, 13)]

@@ -11,6 +11,7 @@ max_attempts: 2
 overrides:
   train_examples: 64
   eval_examples: 32
+  dev_examples: 16
   epochs: 1
 
 grid:
