@@ -1,0 +1,20 @@
+# Roadmap P5 — scale sweep (Qwen2.5-7B) and cross-family check (Llama-3.1-8B),
+# 1 seed (amendment M3). Priorities: must A1, A5, A8; should A2, A7; could A6.
+# Run must first; `--priority M` restricts a session to the must runs.
+# Optional students (Phi-4-mini, SmolLM3; P5.4, could) are added only by an
+# approved decision if budget allows.
+phase: 1
+runs_dir: runs
+max_attempts: 2
+teacher: qwen2.5-32b
+
+grid:
+  arm:   [A1, A5, A8, A2, A7, A6]
+  model: [qwen2.5-7b, llama-3.1-8b]
+  seed:  [0]
+  split: [standard, clean, control]
+
+priority:
+  M: [A1, A5, A8]
+  S: [A2, A7]
+  C: [A6]

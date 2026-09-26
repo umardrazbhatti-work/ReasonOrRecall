@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from ror.config import ExperimentConfig, config_from_dict, load_yaml, _deep_merge  # noqa: E402
+from ror.estimate import estimate_plan  # noqa: E402
 from ror.experiment import preflight, run_experiment  # noqa: E402
 from ror.logging_utils import get_logger  # noqa: E402
 from ror.registry import Registry  # noqa: E402
@@ -30,8 +31,26 @@ log = get_logger("ror.suite")
 TRAINED = {"A5", "A6", "A7", "A8"}
 
 
+PRIORITY_ORDER = {"M": 0, "S": 1, "C": 2, "": 3}
+
+
 def expand(suite_path: str) -> tuple[list[ExperimentConfig], dict]:
+    """The suite's experiments in run order: must before should before could
+    (roadmap priorities), then seed 0 before seed 1, then the suite's order.
+    A suite with `include:` is the union of the listed suites (same folder)."""
     suite = load_yaml(suite_path)
+    if suite.get("include"):
+        configs: list[ExperimentConfig] = []
+        seen_ids: set[str] = set()
+        for name in suite["include"]:
+            sub, _ = expand(str(Path(suite_path).parent / name))
+            for c in sub:
+                if c.experiment_id not in seen_ids:
+                    seen_ids.add(c.experiment_id)
+                    configs.append(c)
+        return configs, suite
+    priority_of = {arm: level for level, arms in (suite.get("priority") or {}).items()
+                   for arm in arms}
     base = load_yaml(ROOT / "configs" / "base.yaml").get("defaults", {})
     arms = load_yaml(ROOT / "configs" / "arms.yaml")          # arm -> {role, supervision, inference}
     models = load_yaml(ROOT / "configs" / "models.yaml").get("models", {})  # model -> {tier, size_b, family}
@@ -85,12 +104,15 @@ def expand(suite_path: str) -> tuple[list[ExperimentConfig], dict]:
         if arm == "A8":
             cfg_dict["teacher"] = teacher
         cfg = config_from_dict(cfg_dict)
+        cfg.priority = priority_of.get(arm, "")
         if label:
             cfg.name = f"{cfg.default_name()}-{label}"
         if cfg.experiment_id in seen:
             continue
         seen.add(cfg.experiment_id)
         configs.append(cfg)
+    order = {id(c): i for i, c in enumerate(configs)}
+    configs.sort(key=lambda c: (PRIORITY_ORDER.get(c.priority, 3), c.seed, order[id(c)]))
     return configs, suite
 
 
@@ -101,7 +123,8 @@ def main() -> None:
     ap.add_argument("--force", action="store_true", help="re-run even finished experiments")
     ap.add_argument("--only", help="restrict to a single arm, e.g. A5")
     ap.add_argument("--model", help="restrict to a single model key")
-    ap.add_argument("--split", help="restrict to one split: standard | clean")
+    ap.add_argument("--split", help="restrict to one split: standard | clean | control")
+    ap.add_argument("--priority", help="restrict to roadmap priorities, e.g. M or MS")
     ap.add_argument("--seed", type=int, help="restrict to one seed")
     ap.add_argument("--runs-dir", help="override the suite's runs_dir (e.g. on Kaggle)")
     args = ap.parse_args()
@@ -115,6 +138,8 @@ def main() -> None:
         configs = [c for c in configs if c.split == args.split]
     if args.seed is not None:
         configs = [c for c in configs if c.seed == args.seed]
+    if args.priority:
+        configs = [c for c in configs if c.priority and c.priority in args.priority]
 
     runs_dir = args.runs_dir or suite.get("runs_dir", "runs")
     reg = Registry(runs_dir, max_attempts=suite.get("max_attempts", 2))
@@ -133,7 +158,14 @@ def main() -> None:
              args.suite, len(configs), len(to_run), len(to_skip))
     log.info("--- PLAN: will run ---")
     for c, reason in to_run:
-        log.info("  RUN  %s  %s  (%s)", c.experiment_id, c.resolved_name(), reason)
+        prio = f"[{c.priority}] " if c.priority else ""
+        log.info("  RUN  %s  %s%s  (%s)", c.experiment_id, prio, c.resolved_name(), reason)
+    trained = {d.name for d in (Path(runs_dir) / "_adapters").glob("*")
+               if (d / "adapter" / "adapter_config.json").exists()}
+    est = estimate_plan([c for c, _ in to_run], trained)
+    log.info("--- ESTIMATE: ~%.1f Kaggle GPU-hours (training %.1f h for %d adapter(s), "
+             "evaluation %.1f h for %d run(s)); speeds: configs/throughput.yaml",
+             est["total"], est["train"], est["adapters"], est["eval"], est["evaluations"])
     if to_skip:
         log.info("--- PLAN: will skip ---")
         for c, reason in to_skip:

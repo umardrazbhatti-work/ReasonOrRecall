@@ -1,0 +1,18 @@
+# Roadmap P4 — the ~32B large model, Tier 1 (Job 3; Kaggle T4x2, 4-bit).
+# A3 zero-shot and A4 few-shot baselines on Qwen2.5-32B; A8 (QLoRA on the
+# 32B-distilled, execution-verified PoT traces) on the 3B student, 2 seeds.
+# Arm/model tier mismatches (A8 x 32B, A3/A4 x 3B) are dropped by the planner.
+# Never add a >=70B model here: that is Tier 2 (P8, paid).
+phase: 1
+runs_dir: runs
+max_attempts: 2
+teacher: qwen2.5-32b
+
+grid:
+  arm:   [A3, A4, A8]
+  model: [qwen2.5-32b, qwen2.5-3b]
+  seed:  [0, 1]
+  split: [standard, clean, control]
+
+priority:
+  M: [A3, A4, A8]

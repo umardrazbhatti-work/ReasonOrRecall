@@ -116,6 +116,7 @@ class ExperimentConfig:
 
     # --- non-identity / operational (excluded from the id hash) ---
     infer_batch_size: int = 8      # generation batch size
+    priority: str = ""             # roadmap M/S/C (run order; set by the suite)
     name: str = ""                 # human label; derived if empty
     max_attempts: int = 2
     notes: str = ""

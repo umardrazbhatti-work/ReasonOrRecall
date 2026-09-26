@@ -40,5 +40,11 @@ def clean_set_path() -> Path:
     return data_dir() / "clean_set" / "clean.jsonl"
 
 
+def control_set_path() -> Path:
+    """The style-control set (clean-set templates on FinQA test tables, roadmap
+    P2.7), written by scripts/build_clean_set.py next to the clean set."""
+    return data_dir() / "clean_set" / "control.jsonl"
+
+
 def manifest_path() -> Path:
     return data_dir() / MANIFEST_NAME

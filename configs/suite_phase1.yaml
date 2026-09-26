@@ -1,24 +1,11 @@
-# Phase-1 sweep (free, on Kaggle). The runner takes the cross-product of `grid`,
-# drops arm/model tier mismatches, collapses seeds for non-trained arms, and skips
-# anything the registry has already finished. Dry-run first:
+# The whole Tier-1 study (free, Kaggle) = the union of the phase suites, so the
+# matrix is defined in one place per phase (roadmap P1.7, amendment M3).
+# Dry-run first:
 #   python scripts/run_suite.py configs/suite_phase1.yaml --dry-run
+# Sessions normally run one phase suite at a time (suite_p3_3b, suite_p4_32b,
+# suite_p5_scale), in the roadmap's order. Tier 2 (>=70B, P8) has its own suite
+# on paid compute; never add a >=70B model to these.
 phase: 1
 runs_dir: runs
 max_attempts: 2
-
-# teacher used to generate distilled PoT traces for arm A8 (Phase-1 = ~32B)
-teacher: qwen2.5-32b
-
-grid:
-  arm:    [A1, A2, A3, A4, A5, A6, A7, A8]
-  model:  [qwen2.5-3b, qwen2.5-7b, llama-3.1-8b, qwen2.5-32b]
-  seed:   [0, 1]
-  split:  [standard, clean]
-
-# Notes:
-# - student arms (A1,A2,A5-A8) run only with student models; A3/A4 only with the
-#   32B — enforced by role/tier compatibility in the runner.
-# - start narrow before the full sweep, e.g.:
-#     python scripts/run_suite.py configs/suite_phase1.yaml --only A5 --model qwen2.5-3b
-# - Phase 2 (Job 4) uses a separate suite that swaps the large model to qwen2.5-72b
-#   on paid compute; do NOT add 72b here.
+include: [suite_p3_3b.yaml, suite_p4_32b.yaml, suite_p5_scale.yaml]

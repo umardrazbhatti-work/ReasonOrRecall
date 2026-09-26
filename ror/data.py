@@ -13,12 +13,15 @@ turned into Example-shaped JSONL by `scripts/prepare_data.py` (logic in
                 (test answers are private; the labelled dev split is the anchor)
   tatqa      -> processed/tatqa/{train,dev,test}.jsonl         standard = test (gold)
   "clean"    -> clean_set/clean.jsonl, built by scripts/build_clean_set.py
+  "control"  -> clean_set/control.jsonl: the same templates on FinQA test
+                tables (pre-cutoff), separating question style from recency
 
 Split naming used across the repo:
   "train"    -> training split
   "dev"      -> development split (validation / early stopping)
   "standard" -> the benchmark evaluation split (the potentially-contaminated one)
   "clean"    -> the post-cutoff held-out set
+  "control"  -> the style-control set (templated questions, pre-cutoff tables)
 """
 from __future__ import annotations
 
@@ -29,7 +32,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from .paths import clean_set_path, data_dir, manifest_path, processed_path
+from .paths import clean_set_path, control_set_path, data_dir, manifest_path, processed_path
 
 # the benchmark split each dataset is evaluated on as "standard"
 STANDARD_SPLIT = {"finqa": "test", "convfinqa": "dev", "tatqa": "test"}
@@ -51,9 +54,9 @@ class Example:
 def load_dataset(name: str, split: str) -> list[Example]:
     """Load a dataset split as a list[Example].
 
-    name in {finqa, convfinqa, tatqa}; split in {train, dev, standard, clean}
-    ("test" is accepted as an alias of the raw test file). For "clean", load
-    clean_set/clean.jsonl regardless of `name`.
+    name in {finqa, convfinqa, tatqa}; split in {train, dev, standard, clean,
+    control} ("test" is accepted as an alias of the raw test file). "clean" and
+    "control" load clean_set/{clean,control}.jsonl regardless of `name`.
     """
     path = split_path(name, split)
     if not path.exists():
@@ -65,12 +68,15 @@ def split_path(name: str, split: str) -> Path:
     """Where `load_dataset(name, split)` reads from."""
     if split == "clean":
         return clean_set_path()
+    if split == "control":
+        return control_set_path()
     if name not in STANDARD_SPLIT:
         raise ValueError(f"unknown dataset {name!r}; known: {', '.join(DATASETS)}")
     files = {"train": "train", "dev": "dev", "test": "test",
              "standard": STANDARD_SPLIT[name]}
     if split not in files:
-        raise ValueError(f"unknown split {split!r}; known: {', '.join(files)}, clean")
+        raise ValueError(f"unknown split {split!r}; known: {', '.join(files)}, clean, "
+                         f"control")
     return processed_path(name, files[split])
 
 
@@ -271,8 +277,8 @@ def _sha256(path: Path) -> str:
 
 
 def _missing_message(name: str, split: str, path: Path) -> str:
-    if split == "clean":
-        return (f"clean set not built yet ({path}); run scripts/build_clean_set.py "
+    if split in ("clean", "control"):
+        return (f"{split} set not built yet ({path}); run scripts/build_clean_set.py "
                 f"and add it to the data directory")
     return (f"{name}/{split} data not found at {path}; run scripts/prepare_data.py, "
             f"or on Kaggle attach the ror-data dataset (ROR_DATA_DIR)")

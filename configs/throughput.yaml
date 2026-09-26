@@ -1,0 +1,30 @@
+# Speeds used to estimate GPU-hours in suite plans (roadmap §5, P1.7).
+# One Kaggle T4 per student; the 32B large model uses both T4s.
+# "measured" values come from Kaggle runs; the rest are scaled by parameter
+# count and are replaced by the pilots (P1.4, P4.1, P5.1) as they run.
+
+train_tokens_per_s:            # QLoRA training, 4-bit, fp16, batch 1x16, checkpointing
+  qwen2.5-3b: 310              # measured 2026-09-26 (smoke run)
+  qwen2.5-7b: 126              # scaled 310 x 3.09/7.62 (P5.1 measures)
+  llama-3.1-8b: 119            # scaled 310 x 3.09/8.03 (P5.1 measures)
+  phi-4-mini: 252              # scaled 310 x 3.09/3.8
+
+answers_per_s:                 # greedy, batch 8, FinQA prompts (~1,100 tokens)
+  qwen2.5-3b:   {answer: 1.0,  pot: 0.4,   cot: 0.3}    # answer measured 2026-09-26
+  qwen2.5-7b:   {answer: 0.4,  pot: 0.16,  cot: 0.12}   # scaled
+  llama-3.1-8b: {answer: 0.38, pot: 0.15,  cot: 0.11}   # scaled
+  phi-4-mini:   {answer: 0.8,  pot: 0.32,  cot: 0.24}   # scaled
+  qwen2.5-32b:  {answer: 0.08, pot: 0.03,  cot: 0.025}  # rough; P4.1 measures
+
+fewshot_speed_factor: 0.35     # few-shot prompts are ~3x longer (prefill-bound)
+model_load_hours: 0.03         # download (cached after the first) + 4-bit load
+
+tokens_per_question:           # prompt + target, measured on the smoke slice
+  finqa: 1087
+train_questions:               # after dropping items longer than max_seq_len
+  finqa: 6157
+eval_items:                    # questions per evaluation split
+  standard: 1147
+  clean: 400
+  control: 400
+  dev: 883

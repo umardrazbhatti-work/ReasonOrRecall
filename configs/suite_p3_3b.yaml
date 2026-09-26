@@ -1,0 +1,20 @@
+# Roadmap P3 — main student Qwen2.5-3B (Jobs 1-2, Tier 1, free).
+# A1/A2 prompted; A5/A6/A7 trained with 2 seeds (proposal §7 seed sweep). A8 on
+# 3B is in suite_p4_32b.yaml because it needs the teacher's traces.
+# Each adapter is trained once and evaluated on the standard, clean and control
+# splits; clean/control are "not ready" (no attempt used) until P2 builds them,
+# and run as evaluation-only experiments afterwards (P3.7).
+# Run order: priority, then seed 0 before seed 1, then the arm order below
+# (A5 = P3.1, A7 = P3.3, A6 = P3.4, A1/A2 = P3.5, seed 1 = P3.6).
+phase: 1
+runs_dir: runs
+max_attempts: 2
+
+grid:
+  arm:   [A5, A7, A6, A1, A2]
+  model: [qwen2.5-3b]
+  seed:  [0, 1]
+  split: [standard, clean, control]
+
+priority:
+  M: [A5, A7, A6, A1, A2]

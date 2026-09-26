@@ -113,3 +113,37 @@ def test_aggregate_adds_confidence_intervals(tmp_path):
     assert not any(k.startswith("_") for k in row)                  # no internals leak
     agg.write_md(tmp_path / "t.md", table)
     assert "[" in (tmp_path / "t.md").read_text(encoding="utf-8")
+
+
+def test_phase_suites_order_priorities_and_union():
+    run_suite = _load_script("run_suite")
+    p3, _ = run_suite.expand(str(ROOT / "configs" / "suite_p3_3b.yaml"))
+    std = [(c.arm, c.seed) for c in p3 if c.split == "standard"]
+    assert std == [("A5", 0), ("A7", 0), ("A6", 0), ("A1", 0), ("A2", 0),
+                   ("A5", 1), ("A7", 1), ("A6", 1)]                # P3.1 .. P3.6 order
+    assert {c.split for c in p3} == {"standard", "clean", "control"}
+    p5, _ = run_suite.expand(str(ROOT / "configs" / "suite_p5_scale.yaml"))
+    assert [c.priority for c in p5] == sorted((c.priority for c in p5),
+                                              key=run_suite.PRIORITY_ORDER.get)
+    assert {c.arm for c in p5 if c.priority == "M"} == {"A1", "A5", "A8"}
+    p4, _ = run_suite.expand(str(ROOT / "configs" / "suite_p4_32b.yaml"))
+    assert {(c.arm, c.model) for c in p4} == {("A3", "qwen2.5-32b"), ("A4", "qwen2.5-32b"),
+                                              ("A8", "qwen2.5-3b")}
+    union, suite = run_suite.expand(str(ROOT / "configs" / "suite_phase1.yaml"))
+    assert suite["runs_dir"] == "runs"
+    assert {c.experiment_id for c in union} == {c.experiment_id for c in p3 + p4 + p5}
+
+
+def test_estimate_trains_each_adapter_once():
+    from ror.config import ExperimentConfig
+    from ror.estimate import estimate_plan, train_hours
+
+    thr = {"train_tokens_per_s": {"qwen2.5-3b": 310}, "tokens_per_question": {"finqa": 1087},
+           "train_questions": {"finqa": 6157}, "answers_per_s": {"qwen2.5-3b": {"answer": 1.0}},
+           "eval_items": {"standard": 1147, "clean": 400}, "model_load_hours": 0.0}
+    a5 = [ExperimentConfig(arm="A5", model="qwen2.5-3b", supervision="answer", split=s)
+          for s in ("standard", "clean")]
+    assert 6.0 < train_hours(a5[0], thr) < 6.3                   # ~6 h/epoch + selection
+    est = estimate_plan(a5, thr=thr)
+    assert est["adapters"] == 1 and est["evaluations"] == 2
+    assert estimate_plan(a5, trained={a5[0].training_id}, thr=thr)["train"] == 0.0
