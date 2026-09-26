@@ -192,3 +192,15 @@ def test_session_ending_between_training_and_selection(tmp_path, tiny_model, mon
     monkeypatch.setattr(training, "build_sft_records", must_not_train)
     res = run_experiment(cfg, runs_dir=runs)
     assert res is not None and res.extra["train"]["selection"]["chosen_step"] in (1, 2)
+
+
+def test_multi_item_batches_without_gradient_checkpointing(tmp_path, tiny_model):
+    # the P1.4 pilot's settings: batch > 1 (grouped by length), checkpointing off
+    from ror.experiment import run_experiment
+
+    cfg = _cfg(epochs=1, batch_size=2, grad_accum=1, gradient_checkpointing=False)
+    res = run_experiment(cfg, runs_dir=tmp_path / "runs")
+    assert res is not None
+    assert res.extra["train"]["batch"] == {"batch_size": 2, "grad_accum": 1,
+                                           "gradient_checkpointing": False}
+    assert res.extra["train"]["global_steps"] == 1

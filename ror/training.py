@@ -130,7 +130,7 @@ def _train(cfg: ExperimentConfig, examples_train: list[Example], home: Path) -> 
     model = base.model
     if base.quantized:
         model = prepare_model_for_kbit_training(
-            model, use_gradient_checkpointing=True,
+            model, use_gradient_checkpointing=cfg.gradient_checkpointing,
             gradient_checkpointing_kwargs={"use_reentrant": False})
     model = get_peft_model(model, LoraConfig(
         r=cfg.lora_r, lora_alpha=cfg.lora_alpha, lora_dropout=cfg.lora_dropout,
@@ -157,8 +157,9 @@ def _train(cfg: ExperimentConfig, examples_train: list[Example], home: Path) -> 
         save_steps=SAVE_STEPS,
         save_total_limit=2,
         eval_strategy="no",           # dev loss is evaluated at the selection steps (callback)
-        gradient_checkpointing=True,
+        gradient_checkpointing=cfg.gradient_checkpointing,
         gradient_checkpointing_kwargs={"use_reentrant": False},
+        group_by_length=cfg.batch_size > 1,   # less padding in multi-item batches
         fp16=use_cuda() and dtype == torch.float16,
         bf16=use_cuda() and dtype == torch.bfloat16,
         use_cpu=not use_cuda(),
@@ -217,6 +218,8 @@ def _train(cfg: ExperimentConfig, examples_train: list[Example], home: Path) -> 
         "compute_dtype": str(dtype).replace("torch.", ""),
         "adapter_dtype": sorted({str(p.dtype).replace("torch.", "")
                                  for p in trainer.model.parameters() if p.requires_grad}),
+        "batch": {"batch_size": cfg.batch_size, "grad_accum": cfg.grad_accum,
+                  "gradient_checkpointing": cfg.gradient_checkpointing},
         "peak_gpu_mem_gb": (round(torch.cuda.max_memory_allocated() / 1e9, 2)
                             if torch.cuda.is_available() else None),
         "log_history": _curve(trainer.state.log_history),

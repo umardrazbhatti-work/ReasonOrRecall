@@ -47,6 +47,7 @@ IDENTITY_FIELDS = (
     "max_seq_len",
     "batch_size",
     "grad_accum",
+    "gradient_checkpointing",
     "self_consistency_k",
     "max_new_tokens",
     "temperature",
@@ -75,6 +76,7 @@ TRAINING_FIELDS = (
     "max_seq_len",
     "batch_size",
     "grad_accum",
+    "gradient_checkpointing",
 )
 
 
@@ -105,6 +107,7 @@ class ExperimentConfig:
     max_seq_len: int = 2048
     batch_size: int = 1
     grad_accum: int = 16
+    gradient_checkpointing: bool = True   # memory vs speed (P1.4 pilot decides)
 
     # --- inference (identity-affecting) ---
     self_consistency_k: int = 1

@@ -139,6 +139,21 @@ def run_experiment(
         return None
     finally:
         remove_handler(log, fh)
+        _release_gpu()
+
+
+def _release_gpu() -> None:
+    """Drop cached GPU memory between runs (after an out-of-memory error too)."""
+    import gc
+
+    gc.collect()
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except ImportError:
+        pass
 
 
 def _raised_by_stub(exc: BaseException) -> bool:

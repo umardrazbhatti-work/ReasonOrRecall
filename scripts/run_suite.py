@@ -38,13 +38,18 @@ def expand(suite_path: str) -> tuple[list[ExperimentConfig], dict]:
     teacher = suite.get("teacher")
     phase = suite.get("phase", 1)
     overrides = suite.get("overrides", {})   # e.g. a smoke suite's small slice
+    # optional list of {label, <config overrides>}; each is crossed with the grid
+    variants = suite.get("variants") or [{}]
     grid = suite.get("grid", {})
     keys = list(grid.keys())
 
     seen: set[str] = set()
     configs: list[ExperimentConfig] = []
-    for combo in itertools.product(*(grid[k] for k in keys)):
+    for combo, variant in itertools.product(
+            itertools.product(*(grid[k] for k in keys)), variants):
         d = dict(zip(keys, combo))
+        variant = dict(variant)
+        label = variant.pop("label", "")
         arm = d["arm"]
         model = d["model"]
         arm_spec = arms.get(arm, {})
@@ -68,6 +73,7 @@ def expand(suite_path: str) -> tuple[list[ExperimentConfig], dict]:
         cfg_dict = _deep_merge(base, {
             **arm_spec,
             **overrides,
+            **variant,
             "arm": arm,
             "model": model,
             "seed": d.get("seed", 0),
@@ -79,6 +85,8 @@ def expand(suite_path: str) -> tuple[list[ExperimentConfig], dict]:
         if arm == "A8":
             cfg_dict["teacher"] = teacher
         cfg = config_from_dict(cfg_dict)
+        if label:
+            cfg.name = f"{cfg.default_name()}-{label}"
         if cfg.experiment_id in seen:
             continue
         seen.add(cfg.experiment_id)

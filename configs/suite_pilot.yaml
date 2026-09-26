@@ -1,0 +1,25 @@
+# Roadmap P1.4 — throughput pilot (Kaggle T4, ~1-1.5 GPU-h).
+# The same A5 training slice under four batch / memory settings. The effective
+# batch is 16 in all of them; only speed and memory differ. The fastest setting
+# that fits in memory is frozen in configs/base.yaml before any study run.
+# Riskiest (most memory) last: an out-of-memory variant fails alone and is not
+# retried (max_attempts 1). Results: tokens/s and peak GPU memory per variant
+# in runs_pilot/report/ and train_stats.json.
+phase: 1
+runs_dir: runs_pilot
+max_attempts: 1
+overrides:
+  train_examples: 256       # 16 optimizer steps; ~280k training tokens per variant
+  eval_examples: 16
+  dev_examples: 16
+  selection_checks: 1       # selection is not what is measured here
+grid:
+  arm:    [A5]
+  model:  [qwen2.5-3b]
+  seed:   [0]
+  split:  [standard]
+variants:
+  - {label: b1x16-gc,   batch_size: 1, grad_accum: 16, gradient_checkpointing: true}
+  - {label: b4x4-gc,    batch_size: 4, grad_accum: 4,  gradient_checkpointing: true}
+  - {label: b1x16-nogc, batch_size: 1, grad_accum: 16, gradient_checkpointing: false}
+  - {label: b4x4-nogc,  batch_size: 4, grad_accum: 4,  gradient_checkpointing: false}
