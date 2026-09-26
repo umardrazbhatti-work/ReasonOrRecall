@@ -110,8 +110,20 @@ def test_build_report_writes_figures_and_pages(tmp_path):
 
 
 def test_build_report_on_an_empty_folder(tmp_path):
-    pytest.importorskip("matplotlib")
     from ror.report import build_report
 
     files = build_report(tmp_path / "runs")
     assert [f.name for f in files] == ["index.html", "report.md"]
+
+
+def test_report_without_matplotlib_still_writes_the_tables(tmp_path, monkeypatch):
+    import ror.report as report
+
+    def no_matplotlib():
+        raise ImportError("No module named 'matplotlib'")
+
+    monkeypatch.setattr(report, "_plt", no_matplotlib)
+    files = report.build_report(make_runs(tmp_path))
+    assert [f.name for f in files] == ["index.html", "report.md"]
+    page = files[0].read_text(encoding="utf-8")
+    assert "matplotlib is not installed" in page and "A7-qwen2.5-3b-finqa-clean-s0" in page

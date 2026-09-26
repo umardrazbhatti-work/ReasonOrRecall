@@ -807,7 +807,8 @@ CAPTIONS = {
 
 
 def build_report(runs_dir: str | Path, out_dir: Optional[str | Path] = None) -> list[Path]:
-    """Write the figures, index.html and report.md for `runs_dir`; return the files."""
+    """Write the figures, index.html and report.md for `runs_dir`; return the files.
+    Without matplotlib the pages are still written (tables only) and say so."""
     runs_dir = Path(runs_dir)
     out = Path(out_dir) if out_dir else runs_dir / REPORT_DIR
     out.mkdir(parents=True, exist_ok=True)
@@ -815,12 +816,6 @@ def build_report(runs_dir: str | Path, out_dir: Optional[str | Path] = None) -> 
         old.unlink()
     runs = load_runs(runs_dir)
     statuses = _statuses(runs_dir)
-    plt = _plt()
-    figs: list[Path] = []
-
-    def add(p: Optional[Path]) -> None:
-        if p is not None:
-            figs.append(p)
 
     focus = next((r for r in reversed(runs) if r["_predictions"]), None)
     items: list[dict] = []
@@ -831,6 +826,34 @@ def build_report(runs_dir: str | Path, out_dir: Optional[str | Path] = None) -> 
             items.append({**row, **{f"_{k}": v for k, v in feats.items()},
                           "_outcome": outcome(row),
                           "_variants": match_variants(row, feats.get("answer_text"))})
+
+    try:
+        plt = _plt()
+    except ImportError:
+        plt = None
+    figs = _figures(plt, out, runs, focus, items, statuses) if plt else []
+
+    summary = _summary(runs, focus, items, statuses)
+    if plt is None:
+        summary.append("No figures: matplotlib is not installed where this report was built "
+                       "(pip install matplotlib).")
+    html_path = out / "index.html"
+    html_path.write_text(_html(runs_dir, runs, focus, items, figs, summary), encoding="utf-8")
+    md_path = out / "report.md"
+    md_path.write_text(_markdown(runs_dir, runs, focus, items, figs, summary), encoding="utf-8")
+    return figs + [html_path, md_path]
+
+
+def _figures(plt, out: Path, runs: list[dict], focus: Optional[dict], items: list[dict],
+             statuses: Counter) -> list[Path]:
+    """Draw every figure that has data; return the files written."""
+    figs: list[Path] = []
+
+    def add(p: Optional[Path]) -> None:
+        if p is not None:
+            figs.append(p)
+
+    if focus:
         add(fig_scorecard(plt, focus, items, _arm_note(focus), out / "01_scorecard.png"))
         add(fig_training_curve(plt, focus, out / "02_training_curve.png"))
         add(fig_lr_grad(plt, focus, out / "03_learning_rate_and_gradients.png"))
@@ -867,13 +890,7 @@ def build_report(runs_dir: str | Path, out_dir: Optional[str | Path] = None) -> 
     add(fig_gap(plt, runs, out / "16_contamination_gap.png"))
     add(fig_faithfulness(plt, runs, out / "17_faithfulness.png"))
     add(fig_status(plt, statuses, out / "18_registry_status.png"))
-
-    summary = _summary(runs, focus, items, statuses)
-    html_path = out / "index.html"
-    html_path.write_text(_html(runs_dir, runs, focus, items, figs, summary), encoding="utf-8")
-    md_path = out / "report.md"
-    md_path.write_text(_markdown(runs_dir, runs, focus, items, figs, summary), encoding="utf-8")
-    return figs + [html_path, md_path]
+    return figs
 
 
 def _arm_note(run: dict) -> str:
