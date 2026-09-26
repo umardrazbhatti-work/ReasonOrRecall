@@ -102,15 +102,16 @@ def seconds_left() -> Optional[float]:
 
 # --- FLOP estimates (first-order; see docstring) ---
 
-def training_flops(n_params: float, n_tokens: float, lora: bool = True) -> float:
+def training_flops(n_params: float, n_tokens: float, lora: bool = True,
+                   recompute: bool = True) -> float:
     """Approx training FLOPs.
 
     Full fine-tuning ~ 6 * N * T (fwd 2ND + bwd 4ND). QLoRA skips most of the
-    weight-gradient work, so we use ~4 * N * T. Gradient checkpointing recomputes
-    the forward pass, adding ~1/3, captured by the 1.33 factor.
+    weight-gradient work, so we use ~4 * N * T. Gradient checkpointing
+    (`recompute`) runs the forward pass again, adding ~1/3: the 1.33 factor.
     """
     coef = 4.0 if lora else 6.0
-    return coef * n_params * n_tokens * 1.33
+    return coef * n_params * n_tokens * (1.33 if recompute else 1.0)
 
 
 def inference_flops(n_params: float, prompt_tokens: float, gen_tokens: float,
