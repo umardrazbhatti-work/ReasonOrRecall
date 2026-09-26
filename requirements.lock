@@ -14,6 +14,7 @@ tokenizers==0.22.2
 safetensors==0.7.0
 huggingface_hub==1.11.0
 numpy==2.0.2
+matplotlib==3.10.0
 PyYAML==6.0.3
 pytest==8.4.2
 # Also in the Kaggle image and deliberately NOT used: torchao==0.10.0 (for

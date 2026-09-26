@@ -50,6 +50,10 @@ depend on them. Update this file as you go; it is the shared plan.
 - [ ] Parse tables + text; generate template questions with deterministic gold
 - [ ] Keep only items whose gold program executes (`ror.sandbox`)
 - [ ] Save to `data/clean_set/` as the `clean` split; ~150–400 items
+- [ ] Decide the filing window: after every model ever scored on the set
+      (Phase-2 models included); manual spot-check of a sample (proposal §7)
+- [ ] Control for question style: the same templates on pre-cutoff filings
+      ("templated-standard"), so the gap is not confounded (audit §5.3)
 - [ ] **Check first:** did arXiv:2408.12337 release its GPT-4 traces? If so, reuse
       them and skip trace generation in Job 3.
 
@@ -65,9 +69,15 @@ depend on them. Update this file as you go; it is the shared plan.
       completion-only loss (verified), checkpoints every 50 steps, clean pause
       before the session deadline (no attempt used), resume tested end-to-end
 - [x] Smoke suite `configs/suite_smoke.yaml` (64 train / 32 eval, own runs dir)
-- [ ] Smoke run passes on Kaggle T4; record tokens/s → decide epochs for the study
-      (Kaggle fixes so far: torchao 0.10 hidden from peft; no DataParallel across
-      the two T4s; LoRA weights kept fp32 after trl casts them to bf16)
+- [x] Smoke run passes on Kaggle T4 (2026-09-26, `Results/26-9-26 1500Hrs`):
+      310 training tokens/s, ~1 answer/s; EM 0% after 4 steps (see the report).
+      Kaggle fixes on the way: torchao 0.10 hidden from peft; no DataParallel
+      across the two T4s; LoRA weights kept fp32 after trl casts them to bf16
+- [ ] **Decide the compute plan** (epochs / seeds / models) from the measured
+      speed: the configured sweep is ~880 training GPU-h vs the proposal's
+      120–180 (docs/AUDIT_2026-09-26.md §3)
+- [ ] Early stopping on dev accuracy (+ faithfulness for program arms) with
+      best-checkpoint selection, as proposal §5.4 says — or amend the proposal
 - [ ] Get **one** arm end-to-end: A5, Qwen2.5-3B, FinQA — logged in results.jsonl
 - [ ] Then A6, A7; then the size sweep (Qwen2.5-7B) and cross-family (Llama-3.1-8B)
 
@@ -77,6 +87,14 @@ depend on them. Update this file as you go; it is the shared plan.
       per-item predictions.jsonl; self-consistency still TODO)
 - [ ] Evaluate every arm on `standard` AND `clean`; log EM / faithfulness / exec
 - [ ] Post-hoc program-induction proxy for non-PoT arms (`ror.faithfulness`)
+- [ ] Grounding check for faithfulness: the program's numbers come from the gold
+      table cells (proposal §5.5; `table_cells` is stored per item)
+- [ ] Few-shot exemplars for A2/A4 (generate() refuses fewshot until then)
+- [ ] CoT rationale source for A6 (templated from gold vs teacher-generated)
+- [ ] Verbatim-reproduction / membership-inference check on standard items
+      (proposal §7; gives RQ3 its per-item "likely seen" label)
+- [x] Run report: `ror.report` / `scripts/make_report.py` — figures + index.html
+      per runs folder, shown in the notebook and packed in the output zip
 
 ### Large baseline + teacher (Job 3)
 - [ ] A3/A4 with ~32B on T4×2
@@ -85,19 +103,27 @@ depend on them. Update this file as you go; it is the shared plan.
 ### Aggregate
 - [ ] `scripts/aggregate_results.py` → ablation table + contamination gap +
       accuracy-per-compute frontier from `runs/results.jsonl`
+      (FLOP frontier built; **dollar** frontier needs a price convention for
+      free T4 hours — `cost_usd` is always 0 today)
 - [ ] Sanity pass: numbers reasonable, no missing arms, gaps computed
 
 ## Known issues to settle (before the runs they affect)
 
-- **Percent scale (before A1–A4):** FinQA gold `exe_ans` stores "14%" as 0.14464,
-  but `metrics.normalize_number("14%")` is 14.0, so prompted arms answering in
-  percent are scored wrong. Decide the rule (e.g. accept x or x/100 for
-  percentage questions) in `ror.metrics` before evaluating A1–A4. A5–A8 learn
-  the decimal form and are unaffected.
+Full audit against the proposal: `docs/AUDIT_2026-09-26.md`.
+
+- **Answer-matching rule (before ANY study result):** strict today; the smoke
+  run scores 0% strict vs 15.6% within 1%. Answer-only arms are hit hardest,
+  which would inflate PoT's advantage (H4). Decide, apply to every arm, state
+  it in the paper (audit §4.1). `ror.report` shows every rule side by side.
+
+- **Percent scale (part of the matching rule):** FinQA gold `exe_ans` stores
+  "14%" as 0.14464, but `metrics.normalize_number("14%")` is 14.0. The smoke
+  run shows even A5 still answers "-14.2%" after little training, so this is not
+  only an A1–A4 issue.
 - ~~**`max_seq_len`**~~ resolved: 2048 (decided 2026-09-25). Longer training
   items (~1.5%) are dropped, eval prompts are never truncated.
-- **Compute budget (before the sweep):** 3 epochs at 2048 ≈ 20M training tokens
-  per A5 run; the smoke run logs tokens/s — use it to fix epochs.
+- **Compute budget (before the sweep):** measured 310 tok/s → ~6 h per FinQA
+  epoch for 3B, ~15–16 h for 7B/8B (scaled, unmeasured). See the audit §3.
 - **Session kills cost attempts:** a Kaggle session killed mid-run counts as an
   attempt (default `max_attempts: 2`). Mitigated: runs pause cleanly before
   `SESSION_HOURS` (no attempt used) and resume from the checkpoint.

@@ -98,6 +98,7 @@ ror/                     # the package — all real logic lives here
   models.py              # registry, ≥70B guard, 4-bit student load [IMPLEMENTED]; teacher load [TODO]
   training.py            # resumable QLoRA SFT with time budget [IMPLEMENTED]; distilled traces [TODO]
   inference.py           # greedy batched generation + parsing [IMPLEMENTED]; self-consistency, post-hoc proxy [TODO]
+  report.py              # figures + one-page report per runs folder         [IMPLEMENTED]
 configs/
   base.yaml              # shared defaults
   models.yaml            # model registry (students, teachers, sizes, cutoffs)
@@ -111,9 +112,11 @@ scripts/
   build_clean_set.py     # build the contamination-controlled eval set      [TODO — contract given]
   aggregate_results.py   # results.jsonl -> ablation table + frontier       [IMPLEMENTED]
   status.py              # registry dashboard                               [IMPLEMENTED]
+  make_report.py         # <runs>/report/: NN_*.png + index.html            [IMPLEMENTED]
 notebooks/
   kaggle_runner.ipynb    # the Kaggle entry point: clone -> install -> data -> restore -> test -> plan -> run
 tests/                   # pytest; framework, data and Kaggle helpers covered
+docs/                    # proposal.docx (= Proposal V2) + AUDIT_<date>.md (status vs proposal)
 runs/                    # gitignored: per-run logs, adapters, results.jsonl
 data/, dist/             # gitignored: processed data and the Kaggle data zip
 Results/                 # gitignored: Kaggle run outputs, one folder per run (see its README)

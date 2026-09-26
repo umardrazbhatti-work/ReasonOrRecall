@@ -34,6 +34,7 @@ LORA_TARGETS = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", 
 SAVE_STEPS = 50                   # ~20 min of T4 time for the full A5 run
 WARMUP_FRACTION = 0.03            # of total optimizer steps (linear warmup, then cosine)
 DEV_EVAL_EXAMPLES = 200           # fixed dev slice for per-epoch eval loss
+LOG_POINTS = 50                   # training-curve points logged per run (for the report)
 TRAIN_STOP_RESERVE_S = 45 * 60    # stop training this long before the deadline
 MIN_INFERENCE_S = 20 * 60         # after training, pause if less time than this is left
 
@@ -86,6 +87,7 @@ def train_qlora(
     dtype = compute_dtype()
     ckpt_dir = run_dir / "checkpoints"
     steps_per_epoch = math.ceil(len(train_recs) / (cfg.batch_size * cfg.grad_accum))
+    total_steps = steps_per_epoch * cfg.epochs
     args = SFTConfig(
         output_dir=str(ckpt_dir),
         num_train_epochs=cfg.epochs,
@@ -94,8 +96,9 @@ def train_qlora(
         gradient_accumulation_steps=cfg.grad_accum,
         learning_rate=cfg.learning_rate,
         lr_scheduler_type="cosine",
-        warmup_steps=math.ceil(WARMUP_FRACTION * steps_per_epoch * cfg.epochs),
-        logging_steps=10,
+        warmup_steps=math.ceil(WARMUP_FRACTION * total_steps),
+        logging_steps=max(1, total_steps // LOG_POINTS),   # logging only; not part of the id
+        logging_first_step=True,
         save_strategy="steps",
         save_steps=SAVE_STEPS,
         save_total_limit=2,
@@ -129,6 +132,8 @@ def train_qlora(
     start_step = _checkpoint_step(last)
     log.info("QLoRA: %s", f"resuming from {last}" if last else "starting fresh")
 
+    if torch.cuda.is_available():
+        torch.cuda.reset_peak_memory_stats()
     t0 = time.time()
     out = trainer.train(resume_from_checkpoint=last)
     runtime = time.time() - t0
@@ -155,6 +160,9 @@ def train_qlora(
         "compute_dtype": str(dtype).replace("torch.", ""),
         "adapter_dtype": sorted({str(p.dtype).replace("torch.", "")
                                  for p in trainer.model.parameters() if p.requires_grad}),
+        "peak_gpu_mem_gb": (round(torch.cuda.max_memory_allocated() / 1e9, 2)
+                            if torch.cuda.is_available() else None),
+        "log_history": _curve(trainer.state.log_history),
         "versions": library_versions(),
     }
     trainer.save_model(str(adapter_dir))
@@ -215,6 +223,25 @@ def _n_tokens(tokenizer: Any, messages: list[dict]) -> int:
     if hasattr(ids, "keys"):  # transformers 5 returns a BatchEncoding
         ids = ids["input_ids"]
     return len(ids)
+
+
+_CURVE_KEYS = ("step", "epoch", "loss", "learning_rate", "grad_norm", "eval_loss",
+               "eval_mean_token_accuracy")
+
+
+def _curve(log_history: list[dict]) -> list[dict]:
+    """The Trainer's log history reduced to the curve fields, as floats."""
+    points = []
+    for h in log_history:
+        point = {}
+        for k in _CURVE_KEYS:
+            try:
+                point[k] = float(h[k])
+            except (KeyError, TypeError, ValueError):
+                continue
+        if len(point) > 2:                # more than step/epoch
+            points.append(point)
+    return points
 
 
 def _dev_examples(cfg: ExperimentConfig) -> list[Example]:

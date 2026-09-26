@@ -167,6 +167,7 @@ def _execute(cfg: ExperimentConfig, run_dir: Path) -> RunResult:
     if cfg.eval_examples:
         examples = examples[:cfg.eval_examples]
 
+    t0 = time.time()
     model = None
     if cfg.arm in _TRAINED_ARMS:
         model = training.train_qlora(cfg, examples_train=data.load_dataset(cfg.dataset, "train"),
@@ -174,8 +175,10 @@ def _execute(cfg: ExperimentConfig, run_dir: Path) -> RunResult:
     else:
         model = models.load_student(cfg.model) if cfg.role == "student" \
             else models.load_teacher(cfg.model, phase=cfg.phase)
+    t1 = time.time()
 
     preds = inference.generate(model, cfg, examples)
+    t2 = time.time()
     golds = [ex.answer for ex in examples]
 
     spec = models.resolve_model(cfg.model)
@@ -206,6 +209,8 @@ def _execute(cfg: ExperimentConfig, run_dir: Path) -> RunResult:
     result.extra["data"] = data.dataset_fingerprint(cfg.dataset, cfg.split)
     result.extra["unparsed_answers"] = sum(p.answer is None for p in preds)
     result.extra["decoding"] = inference.decoding_settings(cfg)
+    result.extra["timing_s"] = {"model_and_training": round(t1 - t0, 1),
+                                "inference": round(t2 - t1, 1)}
     result.extra["versions"] = library_versions()
     return result
 

@@ -14,9 +14,13 @@ this README is tracked.
 `ror-output_<runs>_<time>.zip` and extract it into the folder. The notebook's
 last cell writes it; it contains:
 
+- `runs_smoke/report/index.html` (or `runs/report/`): **open this first** — the
+  figures (`NN_*.png`) and every number in tables. To rebuild it locally:
+  `python scripts/make_report.py --runs-dir "Results/<folder>/runs_smoke"`;
 - `session_log.txt`: the output of every command in the session (tests, plan,
   training, inference), with progress bars thinned out;
-- `requirements.lock`: the exact library versions of that session;
+- `requirements.lock`: the exact library versions of that session (for
+  reproducing it, not a result);
 - `runs_smoke/` or `runs/`: the registry, `results.jsonl` and one folder per
   experiment, without the adapter weights (those stay in the Kaggle output,
   where the next session restores them from).

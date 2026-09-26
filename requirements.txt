@@ -17,6 +17,9 @@ datasets>=5.0
 sentencepiece>=0.2
 tqdm>=4.66
 
+# run reports (figures): scripts/make_report.py, ror.report
+matplotlib>=3.10
+
 # optional: faster inference / teacher serving (Job 3/4)
 # vllm>=0.5
 # optional: teacher via API (Job 4)
