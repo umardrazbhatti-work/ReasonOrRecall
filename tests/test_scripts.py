@@ -96,3 +96,20 @@ def test_pilot_suite_expands_its_variants():
     assert len({c.experiment_id for c in configs}) == 4
     assert configs[0].resolved_name().endswith("-b1x16-gc")
     assert all(c.train_examples == 256 and c.selection_checks == 1 for c in configs)
+
+
+def test_aggregate_adds_confidence_intervals(tmp_path):
+    agg = _load_script("aggregate_results")
+    rows = [_row("a", em=0.5, ts=1), _row("b", seed=1, em=0.5, ts=1),
+            _row("c", split="clean", em=0.25, ts=1)]
+    items = {"a": {f"q{i}": i % 2 == 0 for i in range(200)},
+             "b": {f"q{i}": i % 2 == 0 for i in range(200)},
+             "c": {f"k{i}": i % 4 == 0 for i in range(200)}}
+    table, _ = agg.aggregate(rows, items)
+    row = table[0]
+    assert row["exact_match_lo_standard"] < 0.5 < row["exact_match_hi_standard"]
+    assert row["exact_match_seed_sd_standard"] == 0.0
+    assert row["contamination_gap_lo"] < row["contamination_gap"] < row["contamination_gap_hi"]
+    assert not any(k.startswith("_") for k in row)                  # no internals leak
+    agg.write_md(tmp_path / "t.md", table)
+    assert "[" in (tmp_path / "t.md").read_text(encoding="utf-8")

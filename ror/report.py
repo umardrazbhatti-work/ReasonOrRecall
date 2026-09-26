@@ -248,7 +248,18 @@ def load_runs(runs_dir: Path) -> list[dict]:
         d = Path(runs_dir) / r["exp_id"]
         r["_predictions"] = _read_jsonl(d / "predictions.jsonl")
         r["_train"] = (r.get("extra") or {}).get("train") or _read_json(d / "train_stats.json") or {}
+        r["_ci"] = _run_ci(r["_predictions"])
     return runs
+
+
+def _run_ci(predictions: list[dict]) -> Optional[tuple[float, float]]:
+    """95% bootstrap CI of a run's exact match from its per-item correctness."""
+    if not predictions:
+        return None
+    from .stats import bootstrap_mean_ci
+
+    _, lo, hi = bootstrap_mean_ci([bool(p.get("correct")) for p in predictions])
+    return (lo, hi)
 
 
 def _examples_by_uid(dataset: str, split: str) -> dict:
@@ -679,19 +690,28 @@ def fig_all_runs(plt, runs: list[dict], path: Path) -> Optional[Path]:
         return None
     labels = sorted({_run_label(r) for r in runs})
     fig, ax = _figure(plt, "Exact match of every completed experiment",
-                      "Standard test split vs the contamination-controlled (clean) set. "
-                      "The gap between the two bars is the contamination gap.",
+                      "Standard test split vs the contamination-controlled (clean) set, "
+                      "with 95% confidence intervals. The gap between the bars is the "
+                      "contamination gap.",
                       height=1.1 + 0.5 * max(len(labels), 3))
     splits = [s for s in ("standard", "clean") if any(r["split"] == s for r in runs)]
     h = 0.8 / len(splits)
     for j, s in enumerate(splits):
         by = {_run_label(r): r.get("exact_match") for r in runs if r["split"] == s}
+        cis = {_run_label(r): r.get("_ci") for r in runs if r["split"] == s}
         ys = [i + (j - (len(splits) - 1) / 2) * h for i in range(len(labels))]
         vals = [by.get(lb) or 0 for lb in labels]
         ax.barh(ys, vals, height=h * 0.9, color=SERIES[j], label=s)
         for y, lb, v in zip(ys, labels, vals):
-            if lb in by:
-                ax.text(v + 0.01, y, _pct(by[lb]), va="center", fontsize=8.5, color=INK2)
+            if lb not in by:
+                continue
+            end = v
+            if cis.get(lb):
+                lo, hi = cis[lb]
+                ax.errorbar([v], [y], xerr=[[max(0.0, v - lo)], [max(0.0, hi - v)]],
+                            fmt="none", ecolor=INK2, elinewidth=1, capsize=3)
+                end = hi
+            ax.text(end + 0.01, y, _pct(by[lb]), va="center", fontsize=8.5, color=INK2)
     ax.set_yticks(range(len(labels)), labels)
     ax.invert_yaxis()
     ax.grid(axis="y", visible=False)
@@ -744,26 +764,45 @@ def fig_gap(plt, runs: list[dict], path: Path) -> Optional[Path]:
         if r["split"] == "clean":
             s = std.get((r["arm"], r["model"], r.get("seed")))
             if s and s.get("exact_match") is not None and r.get("exact_match") is not None:
-                gaps.append((_run_label(r), s["exact_match"] - r["exact_match"]))
+                gaps.append((_run_label(r), s["exact_match"] - r["exact_match"],
+                             _gap_ci(s["_predictions"], r["_predictions"])))
     if len(gaps) < 2:          # one gap is a number, not a chart (it is in the tables)
         return None
     fig, ax = _figure(plt, "Contamination gap",
                       "Exact match on the standard split minus on the clean set, in "
-                      "percentage points. Bigger = more of the standard score is recall.",
+                      "percentage points, with 95% CIs. Bigger = more of the standard "
+                      "score is recall.",
                       height=1.1 + 0.45 * max(len(gaps), 3))
-    labels, vals = zip(*gaps)
+    labels, vals, cis = zip(*gaps)
     ax.barh(range(len(vals)), [100 * v for v in vals], height=0.62, color=SERIES[0])
+    for y, v, ci in zip(range(len(vals)), vals, cis):
+        if ci:
+            ax.errorbar([100 * v], [y], xerr=[[100 * max(0.0, v - ci[0])],
+                                              [100 * max(0.0, ci[1] - v)]],
+                        fmt="none", ecolor=INK2, elinewidth=1, capsize=3)
     ax.axvline(0, color=AXIS, linewidth=1)
     ax.set_yticks(range(len(vals)), labels)
     ax.invert_yaxis()
     ax.grid(axis="y", visible=False)
-    lo, hi = min(0.0, 100 * min(vals)), max(0.0, 100 * max(vals))
+    ends = [c[0] for c in cis if c] + [c[1] for c in cis if c] + list(vals)
+    lo, hi = min(0.0, 100 * min(ends)), max(0.0, 100 * max(ends))
     ax.set_xlim(lo * 1.25 - 1, hi * 1.25 + 1)
-    for y, v in enumerate(vals):
-        ax.text(100 * v, y, f" {100 * v:+.1f} pts", va="center",
+    for y, (v, ci) in enumerate(zip(vals, cis)):
+        x = (ci[1] if v >= 0 else ci[0]) if ci else v
+        ax.text(100 * x, y, f" {100 * v:+.1f} pts ", va="center",
                 ha="left" if v >= 0 else "right", fontsize=9, color=INK2)
     ax.set_xlabel("percentage points")
     return _save(plt, fig, path)
+
+
+def _gap_ci(std_preds: list[dict], clean_preds: list[dict]) -> Optional[tuple[float, float]]:
+    if not std_preds or not clean_preds:
+        return None
+    from .stats import bootstrap_diff_ci
+
+    _, lo, hi = bootstrap_diff_ci([bool(p.get("correct")) for p in std_preds],
+                                  [bool(p.get("correct")) for p in clean_preds], paired=False)
+    return (lo, hi)
 
 
 def fig_faithfulness(plt, runs: list[dict], path: Path) -> Optional[Path]:
@@ -985,7 +1024,10 @@ def _results_rows(runs: list[dict]) -> list[list[str]]:
     rows = []
     for r in runs:
         tr = r["_train"]
-        rows.append([r["name"], _pct(r.get("exact_match")), str(r.get("n_examples")),
+        ci = r.get("_ci")
+        rows.append([r["name"], _pct(r.get("exact_match")),
+                     f"{_pct(ci[0])}-{_pct(ci[1])}" if ci else "-",
+                     _pct(r.get("exact_match_strict")), str(r.get("n_examples")),
                      _pct(r.get("execution_accuracy")), _pct(r.get("faithfulness_primary")),
                      f"{tr.get('train_loss'):.3f}" if tr.get("train_loss") is not None else "-",
                      f"{tr.get('tokens_per_s'):,.0f}" if tr.get("tokens_per_s") else "-",
@@ -994,7 +1036,8 @@ def _results_rows(runs: list[dict]) -> list[list[str]]:
     return rows
 
 
-_RESULT_HEAD = ["experiment", "exact match", "n", "exec acc", "faithfulness", "train loss",
+_RESULT_HEAD = ["experiment", "exact match", "95% CI", "strict", "n", "exec acc",
+                "faithfulness", "train loss",
                 "tok/s", "wall", "train FLOPs", "infer FLOPs", "code"]
 _ITEM_HEAD = ["#", "question", "gold", "human answer", "model reply", "outcome"]
 
