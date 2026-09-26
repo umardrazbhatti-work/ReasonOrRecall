@@ -99,5 +99,5 @@ generation in `inference`. Run `configs/suite_smoke.yaml` first (about 20 min on
 T4), then `configs/suite_phase1.yaml`.
 TODO (contracts in the docstrings): CoT targets (A6), teacher loading and
 distilled traces (A3/A4/A8), self-consistency, the post-hoc faithfulness proxy,
-and `scripts/build_clean_set.py`. Follow `IMPLEMENTATION_PLAN.md`. A run that
+and `scripts/build_clean_set.py`. Follow `docs/ROADMAP.md`. A run that
 reaches an unimplemented stub returns to *pending* without using up an attempt.

@@ -1,9 +1,8 @@
 """Reason or Recall? — package root.
 
-Framework modules (config, registry, results, logging, utils, sandbox, metrics,
-faithfulness, experiment) are implemented. ML modules (data, models, training,
-inference) are contract stubs to be implemented — see their docstrings and
-IMPLEMENTATION_PLAN.md.
+Framework, data, training, inference and report modules are implemented; the
+remaining stubs raise NotImplementedError with their contract in the docstring.
+The plan and tracker is docs/ROADMAP.md.
 """
 from .config import ExperimentConfig, load_experiment_config
 from .registry import Registry, Status

@@ -893,6 +893,16 @@ def _figures(plt, out: Path, runs: list[dict], focus: Optional[dict], items: lis
     return figs
 
 
+def _roadmap_text() -> str:
+    """Progress against docs/ROADMAP.md, or a note if it cannot be read."""
+    try:
+        from .roadmap import load, summary
+
+        return summary(load())
+    except Exception as e:  # noqa: BLE001 — the report must not fail on this
+        return f"(roadmap not available: {e})"
+
+
 def _arm_note(run: dict) -> str:
     try:
         from .config import load_yaml
@@ -1001,11 +1011,13 @@ figcaption {{ color: var(--ink2); font-size: .9rem; padding: 6px 4px 2px; }}
 th, td {{ text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--grid);
   vertical-align: top; }} th {{ color: var(--ink2); font-weight: 600; }}
 td {{ font-variant-numeric: tabular-nums; }}
+pre {{ font-size: .8rem; overflow-x: auto; }}
 </style></head><body><main>
 <h1>Run report: {esc(runs_dir.name)}</h1>
 <p class="sub">Generated {esc(time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime()))} from
 {esc(str(runs_dir))}. Figures are PNGs in this folder; the tables below hold every number.</p>
 <div class="card"><ul>{''.join(f'<li>{esc(s)}</li>' for s in summary)}</ul></div>
+<h2>Project roadmap</h2><pre class="card">{esc(_roadmap_text())}</pre>
 <h2>Figures</h2>{fig_html or '<p>No completed experiment yet.</p>'}
 <h2>All completed experiments</h2>{table(_RESULT_HEAD, _results_rows(runs))}
 <h2>Answer outcomes{(' - ' + esc(focus['name'])) if focus else ''}</h2>

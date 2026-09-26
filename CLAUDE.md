@@ -1,7 +1,8 @@
 # CLAUDE.md — Reason or Recall?
 
 > This is the primary context file for Claude Code. **Read this file and
-> `IMPLEMENTATION_PLAN.md` in full before doing anything.** The full research
+> `docs/ROADMAP.md` (the approved plan and tracker) in full before doing
+> anything.** The full research
 > proposal is in `docs/proposal.docx` (add it to the repo) — treat it as the
 > source of truth for *why*; this file is the source of truth for *how*.
 
@@ -132,13 +133,17 @@ the file contains a precise docstring contract and raises `NotImplementedError`.
 
 ## 6. How to work (suggested loop)
 
-1. Read this file + `IMPLEMENTATION_PLAN.md`. Check `python scripts/status.py`.
-2. Pick the next unchecked item in `IMPLEMENTATION_PLAN.md`. State a short plan.
+1. Read this file + `docs/ROADMAP.md`. Run `python scripts/roadmap.py` and
+   `python scripts/status.py`.
+2. Work only on the current phase's next task (by ID, e.g. P1.2); anything not
+   in the roadmap needs an approved amendment (roadmap §6, §9). State a short
+   plan.
 3. Implement one `[TODO]` module. Keep the public signatures already defined —
    other code depends on them. Run `pytest -q`.
 4. Dry-run the relevant suite: `python scripts/run_suite.py configs/suite_phase1.yaml --dry-run`.
 5. Run for real. Confirm rows appear in `runs/results.jsonl`.
-6. Tick the checkbox in `IMPLEMENTATION_PLAN.md`, commit with a clear message.
+6. Tick the task in `docs/ROADMAP.md`, add the run log / decision log entry,
+   commit with the task ID in the message (e.g. "P1.2: ...").
 
 Start small: get **one** arm (A5, Qwen2.5-3B, FinQA, standard split) end-to-end
 and logged before scaling to the full suite.
