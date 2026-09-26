@@ -113,8 +113,8 @@ def run_experiment(
 
         append_result(runs_dir, result)
         reg.mark_completed(exp_id, metrics_path=str(run_dir / "result.json"))
-        log.info("DONE  %s in %.1fs — EM=%s", name, result.wall_time_s,
-                 result.exact_match)
+        log.info("DONE  %s in %.1fs — EM=%s (strict %s)", name, result.wall_time_s,
+                 result.exact_match, result.exact_match_strict)
         return result
 
     except Exception as e:  # noqa: BLE001 — we want to log *any* failure
@@ -159,7 +159,8 @@ def _execute(cfg: ExperimentConfig, run_dir: Path) -> RunResult:
     `ror.models` to make this run for real.
     """
     from . import data, inference, models, training  # late import
-    from .metrics import exact_match, execution_accuracy
+    from .metrics import (exact_match, execution_accuracy, primary_exact_match,
+                          primary_execution_accuracy)
     from .faithfulness import (executability_rate, program_faithfulness,
                                posthoc_proxy_agreement)
 
@@ -189,13 +190,16 @@ def _execute(cfg: ExperimentConfig, run_dir: Path) -> RunResult:
         seed=cfg.seed, phase=cfg.phase, n_examples=len(examples),
         model_family=spec.get("family", ""), model_size_b=spec.get("size_b"),
     )
-    result.exact_match = exact_match([p.answer for p in preds], golds)
+    answers = [p.answer for p in preds]
+    result.exact_match = primary_exact_match(answers, golds, [p.percent_form for p in preds])
+    result.exact_match_strict = exact_match(answers, golds)
     _record_compute(result, model, preds, float(spec.get("size_b") or 0.0) * 1e9)
     write_predictions(run_dir, _prediction_rows(preds, golds))
 
     if any(getattr(p, "program", None) for p in preds):
         exec_vals = [getattr(p, "exec_value", None) for p in preds]
-        result.execution_accuracy = execution_accuracy(exec_vals, golds)
+        result.execution_accuracy = primary_execution_accuracy(exec_vals, golds)
+        result.extra["execution_accuracy_strict"] = execution_accuracy(exec_vals, golds)
         result.executability_rate = executability_rate(exec_vals)
         faith_items = inference.to_faith_items(preds, golds)
         result.faithfulness_primary = program_faithfulness(faith_items)
@@ -232,9 +236,11 @@ def _record_compute(result: RunResult, model: object, preds: list, n_params: flo
 def _prediction_rows(preds: list, golds: list) -> list[dict]:
     """Per-item records for runs/<exp_id>/predictions.jsonl (error analysis and
     the per-item reason-vs-recall analysis)."""
-    from .metrics import answers_match
+    from .metrics import answers_match, primary_match
 
-    return [{"uid": p.uid, "gold": g, "pred": p.answer, "correct": answers_match(p.answer, g),
+    return [{"uid": p.uid, "gold": g, "pred": p.answer,
+             "correct": primary_match(p.answer, g, p.percent_form),
+             "correct_strict": answers_match(p.answer, g), "percent_form": p.percent_form,
              "text": p.text, "program": p.program, "exec_value": p.exec_value,
              "prompt_tokens": p.prompt_tokens, "gen_tokens": p.gen_tokens}
             for p, g in zip(preds, golds)]

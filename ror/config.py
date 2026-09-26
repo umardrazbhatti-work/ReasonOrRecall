@@ -51,6 +51,28 @@ IDENTITY_FIELDS = (
     "phase",
 )
 
+# Fields that define a *trained adapter*: no split, no evaluation or decoding
+# settings. Experiments that differ only in those (the standard, clean and
+# control splits) share one adapter, so each model is trained once and
+# evaluated on every split (roadmap P1.1).
+TRAINING_FIELDS = (
+    "arm",
+    "model",
+    "supervision",
+    "dataset",
+    "seed",
+    "teacher",
+    "train_examples",
+    "epochs",
+    "lora_r",
+    "lora_alpha",
+    "lora_dropout",
+    "learning_rate",
+    "max_seq_len",
+    "batch_size",
+    "grad_accum",
+)
+
 
 @dataclass
 class ExperimentConfig:
@@ -97,6 +119,14 @@ class ExperimentConfig:
     def experiment_id(self) -> str:
         """Stable 12-char hash of the identity fields."""
         blob = json.dumps(self.identity_dict(), sort_keys=True, default=str)
+        return hashlib.sha1(blob.encode("utf-8")).hexdigest()[:12]
+
+    @property
+    def training_id(self) -> str:
+        """Stable 12-char hash of TRAINING_FIELDS: the id of the adapter this
+        experiment trains or reuses."""
+        d = asdict(self)
+        blob = json.dumps({k: d[k] for k in TRAINING_FIELDS}, sort_keys=True, default=str)
         return hashlib.sha1(blob.encode("utf-8")).hexdigest()[:12]
 
     def default_name(self) -> str:

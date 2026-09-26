@@ -39,6 +39,7 @@ class Prediction:
     samples: list = field(default_factory=list)  # self-consistency raw samples
     prompt_tokens: int = 0            # for the compute frontier
     gen_tokens: int = 0
+    percent_form: bool = False        # the answer was written with a % sign (metrics M4)
 
 
 def generate(model: Any, cfg: ExperimentConfig, examples: list[Example]) -> list[Prediction]:
@@ -119,6 +120,17 @@ def parse_answer(text: str) -> object:
     return value if value is not None else line
 
 
+def answer_is_percent(text: str) -> bool:
+    """True if the final answer (the part parse_answer reads) is written as a
+    percentage, e.g. "Answer: 14.5%"."""
+    t = (text or "").strip()
+    marks = list(_ANSWER_MARKER.finditer(t))
+    if marks:
+        t = marks[-1].group(1).strip()
+    line = t.splitlines()[0] if t else ""
+    return "%" in line
+
+
 def extract_program(text: str) -> str:
     """The program from a model reply: a ```python block if present (even if
     unterminated), else the whole reply."""
@@ -142,12 +154,12 @@ def to_faith_items(preds: list[Prediction], golds: list) -> list[FaithItem]:
     executed value is `exec_value`. (Grounding is optional — set FaithItem.grounded
     if you implement the cell-reference check.)
     """
-    from .metrics import answers_match
+    from .metrics import primary_match
 
     items = []
     for p, g in zip(preds, golds):
         items.append(FaithItem(
-            correct=answers_match(p.answer, g),
+            correct=primary_match(p.answer, g, p.percent_form),
             pred_answer=p.answer,
             exec_value=p.exec_value,
         ))
@@ -189,4 +201,5 @@ def _prediction(ex: Example, text: str, style: str, prompt_tokens: int,
                           exec_value=value, prompt_tokens=prompt_tokens,
                           gen_tokens=gen_tokens)
     return Prediction(uid=ex.uid, answer=parse_answer(text), text=text,
-                      prompt_tokens=prompt_tokens, gen_tokens=gen_tokens)
+                      prompt_tokens=prompt_tokens, gen_tokens=gen_tokens,
+                      percent_form=answer_is_percent(text))

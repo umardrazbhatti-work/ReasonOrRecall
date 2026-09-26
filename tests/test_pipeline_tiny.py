@@ -56,13 +56,16 @@ def test_a5_end_to_end_logs_a_result(tmp_path, tiny_model):
     assert res is not None, (runs / cfg.experiment_id / "error.txt").read_text() \
         if (runs / cfg.experiment_id / "error.txt").exists() else "no result"
     assert 0.0 <= res.exact_match <= 1.0 and res.n_examples == 2
+    assert res.exact_match_strict is not None and res.exact_match_strict <= res.exact_match
     assert res.train_flops > 0 and res.infer_flops > 0
     assert res.extra["train"]["n_train"] == 2 and res.extra["train"]["global_steps"] == 4
     assert res.extra["train"]["adapter_dtype"] == ["float32"]
 
     run_dir = runs / cfg.experiment_id
-    assert (run_dir / "adapter" / "adapter_config.json").exists()
-    assert not (run_dir / "checkpoints").exists()        # removed once the adapter exists
+    home = runs / "_adapters" / cfg.training_id          # shared by every split
+    assert (home / "adapter" / "adapter_config.json").exists()
+    assert not (home / "checkpoints").exists()           # removed once the adapter exists
+    assert json.loads((run_dir / "training.json").read_text())["reused"] is False
     rows = [json.loads(line) for line in
             (run_dir / "predictions.jsonl").read_text(encoding="utf-8").splitlines()]
     assert len(rows) == 2 and {"uid", "gold", "pred", "correct", "text"} <= set(rows[0])
@@ -90,7 +93,7 @@ def test_pause_mid_training_then_resume_from_checkpoint(tmp_path, tiny_model, mo
     st = Registry(runs).load(cfg.experiment_id)
     assert st.status == Status.PENDING.value and st.attempts == 0
     assert "paused" in st.last_error
-    assert list((runs / cfg.experiment_id / "checkpoints").glob("checkpoint-*"))
+    assert list((runs / "_adapters" / cfg.training_id / "checkpoints").glob("checkpoint-*"))
 
     monkeypatch.setattr(training, "seconds_left", lambda: None)  # next session
     res = run_experiment(cfg, runs_dir=runs)
@@ -125,3 +128,25 @@ def test_lora_weights_stay_fp32_when_the_model_is_4bit(tmp_path, tiny_model):
     assert _adapters_fp32(trainer.model) >= 0
     assert trainable and all(p.dtype == torch.float32 for p in trainable)
     assert _adapters_fp32(trainer.model) == 0   # idempotent
+
+
+def test_trained_once_and_evaluated_on_another_split(tmp_path, tiny_model, monkeypatch):
+    # roadmap P1.1: the clean/control evaluations must reuse the standard run's adapter
+    import ror.training as training
+    from ror.experiment import run_experiment
+
+    runs = tmp_path / "runs"
+    std = _cfg(epochs=1)
+    other = _cfg(epochs=1, split="dev")
+    assert std.training_id == other.training_id and std.experiment_id != other.experiment_id
+    assert run_experiment(std, runs_dir=runs) is not None
+
+    def must_not_train(*a, **k):
+        raise AssertionError("retrained an adapter that already exists")
+
+    monkeypatch.setattr(training, "build_sft_records", must_not_train)
+    res = run_experiment(other, runs_dir=runs)
+    assert res is not None and res.extra["train"]["reused_adapter"] is True
+    assert res.train_flops == res.extra["train"]["train_flops"] > 0   # still costs its training
+    assert len(list((runs / "_adapters").iterdir())) == 1
+    assert Registry(runs).load(other.experiment_id).status == Status.COMPLETED.value

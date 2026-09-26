@@ -35,8 +35,9 @@ class RunResult:
 
     # --- metrics ---
     n_examples: int = 0
-    exact_match: Optional[float] = None
-    execution_accuracy: Optional[float] = None      # PoT arms
+    exact_match: Optional[float] = None              # primary rule (ror.metrics, M4)
+    exact_match_strict: Optional[float] = None       # strict rule, reported alongside
+    execution_accuracy: Optional[float] = None      # PoT arms (primary rule)
     faithfulness_primary: Optional[float] = None     # PoT arms
     faithfulness_proxy: Optional[float] = None        # post-hoc, all arms
     executability_rate: Optional[float] = None        # PoT arms

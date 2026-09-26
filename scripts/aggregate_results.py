@@ -27,7 +27,7 @@ sys.path.insert(0, str(ROOT))
 from ror.config import IDENTITY_FIELDS  # noqa: E402
 from ror.results import load_results  # noqa: E402
 
-METRICS = ["exact_match", "execution_accuracy", "faithfulness_primary",
+METRICS = ["exact_match", "exact_match_strict", "execution_accuracy", "faithfulness_primary",
            "faithfulness_proxy", "executability_rate"]
 
 # identity fields that are table axes (or averaged over) rather than a "variant"

@@ -44,3 +44,17 @@ def test_experiment_yaml_merges_over_base():
                                  base_yaml=ROOT / "configs" / "base.yaml")
     assert cfg.arm == "A5" and cfg.supervision == "answer"
     assert cfg.lora_r == 16  # from base.yaml
+
+
+def test_training_id_ignores_split_and_decoding_only():
+    from ror.config import ExperimentConfig
+
+    base = ExperimentConfig(arm="A5", model="qwen2.5-3b", supervision="answer")
+    same = [ExperimentConfig(arm="A5", model="qwen2.5-3b", supervision="answer", **kw)
+            for kw in ({"split": "clean"}, {"max_new_tokens": 64}, {"eval_examples": 10},
+                       {"infer_batch_size": 2})]
+    assert all(c.training_id == base.training_id for c in same)
+    assert all(c.experiment_id != base.experiment_id for c in same[:3])
+    for kw in ({"seed": 1}, {"learning_rate": 1e-4}, {"epochs": 2}, {"model": "qwen2.5-7b"}):
+        c = ExperimentConfig(**{"arm": "A5", "model": "qwen2.5-3b", "supervision": "answer", **kw})
+        assert c.training_id != base.training_id, kw

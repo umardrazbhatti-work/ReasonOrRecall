@@ -1,15 +1,22 @@
 """QLoRA supervised fine-tuning (Job 1).
 
-`train_qlora` is **resumable**: checkpoints go to runs/<exp_id>/checkpoints every
+**Train once, evaluate on every split** (roadmap P1.1): an adapter is identified
+by `cfg.training_id` (training fields only, no split) and lives in
+`<runs>/_adapters/<training_id>/`, shared by every experiment that differs only
+in its evaluation split or decoding. The first such experiment trains; the
+others reuse the adapter.
+
+`train_qlora` is **resumable**: checkpoints go to the training folder every
 SAVE_STEPS optimizer steps and training resumes from the latest one. It also
 respects the session time budget ($ROR_DEADLINE_UNIX, set by the Kaggle
 notebook): shortly before the deadline it saves, stops, and raises RunPaused so
 the next session continues instead of being hard-killed mid-step.
 
-Outputs in the run directory:
+Outputs in <runs>/_adapters/<training_id>/:
   adapter/          the trained LoRA adapter (the product; checkpoints are
                     deleted once it is saved)
   train_stats.json  counts, losses, throughput, estimated FLOPs, versions
+Each experiment's run folder gets training.json pointing at it.
 """
 from __future__ import annotations
 
@@ -35,6 +42,7 @@ SAVE_STEPS = 50                   # ~20 min of T4 time for the full A5 run
 WARMUP_FRACTION = 0.03            # of total optimizer steps (linear warmup, then cosine)
 DEV_EVAL_EXAMPLES = 200           # fixed dev slice for per-epoch eval loss
 LOG_POINTS = 50                   # training-curve points logged per run (for the report)
+ADAPTERS_DIR = "_adapters"        # <runs>/_adapters/<training_id>/ (no status.json: not an experiment)
 TRAIN_STOP_RESERVE_S = 45 * 60    # stop training this long before the deadline
 MIN_INFERENCE_S = 20 * 60         # after training, pause if less time than this is left
 
@@ -47,16 +55,20 @@ def train_qlora(
     """Fine-tune a student with QLoRA under cfg.supervision and return it, loaded
     with the trained adapter and ready for `ror.inference.generate`.
 
-    Reuses a finished adapter in run_dir if one exists (e.g. training finished
-    but a later step failed), resumes from the latest checkpoint otherwise.
+    The adapter lives in `training_dir(cfg, run_dir)`: a finished one is reused
+    (another split of the same training, or a retry after a later step failed);
+    otherwise training resumes from the latest checkpoint there, if any.
     """
     run_dir = Path(run_dir)
-    adapter_dir = run_dir / "adapter"
-    stats_path = run_dir / "train_stats.json"
+    home = training_dir(cfg, run_dir)
+    adapter_dir = home / "adapter"
+    stats_path = home / "train_stats.json"
     if (adapter_dir / "adapter_config.json").exists() and stats_path.exists():
-        log.info("adapter already trained, reusing %s", adapter_dir)
-        return _load_trained(cfg, adapter_dir, stats_path)
+        log.info("adapter %s already trained, reusing it", cfg.training_id)
+        _link(run_dir, home, cfg, reused=True)
+        return _load_trained(cfg, adapter_dir, stats_path, reused=True)
     _check_budget(TRAIN_STOP_RESERVE_S, "not enough session time left to train")
+    home.mkdir(parents=True, exist_ok=True)
 
     import torch
     from datasets import Dataset
@@ -85,7 +97,7 @@ def train_qlora(
         target_modules=LORA_TARGETS, bias="none", task_type="CAUSAL_LM"))
 
     dtype = compute_dtype()
-    ckpt_dir = run_dir / "checkpoints"
+    ckpt_dir = home / "checkpoints"
     steps_per_epoch = math.ceil(len(train_recs) / (cfg.batch_size * cfg.grad_accum))
     total_steps = steps_per_epoch * cfg.epochs
     args = SFTConfig(
@@ -156,6 +168,7 @@ def train_qlora(
         "train_runtime_s_this_session": runtime,
         "tokens_per_s": tokens_per_step * steps_now / runtime if runtime > 0 else None,
         "train_flops": training_flops(base.n_params, tokens_per_epoch * cfg.epochs),
+        "training_id": cfg.training_id,
         "lora_targets": LORA_TARGETS, "quantized": base.quantized,
         "compute_dtype": str(dtype).replace("torch.", ""),
         "adapter_dtype": sorted({str(p.dtype).replace("torch.", "")
@@ -168,13 +181,20 @@ def train_qlora(
     trainer.save_model(str(adapter_dir))
     stats_path.write_text(json.dumps(stats, indent=2), encoding="utf-8")
     shutil.rmtree(ckpt_dir, ignore_errors=True)  # the adapter is the product
+    _link(run_dir, home, cfg, reused=False)
     log.info("trained: loss %.4f, %d steps, %.0f tok/s", out.training_loss,
              trainer.state.global_step, stats["tokens_per_s"] or 0)
 
     del trainer, model, base
     _free_memory()
     _check_budget(MIN_INFERENCE_S, "trained; not enough session time left for inference")
-    return _load_trained(cfg, adapter_dir, stats_path)
+    return _load_trained(cfg, adapter_dir, stats_path, reused=False)
+
+
+def training_dir(cfg: ExperimentConfig, run_dir: str | Path) -> Path:
+    """The folder of cfg's adapter: <runs>/_adapters/<training_id>/, shared by
+    every experiment (split) with the same training fields."""
+    return Path(run_dir).parent / ADAPTERS_DIR / cfg.training_id
 
 
 def build_sft_records(cfg: ExperimentConfig, examples: list[Example], tokenizer: Any,
@@ -329,7 +349,18 @@ def _free_memory() -> None:
         pass
 
 
-def _load_trained(cfg: ExperimentConfig, adapter_dir: Path, stats_path: Path) -> LoadedModel:
+def _link(run_dir: Path, home: Path, cfg: ExperimentConfig, reused: bool) -> None:
+    """Record in the experiment's folder which adapter it used."""
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "training.json").write_text(json.dumps({
+        "training_id": cfg.training_id, "reused": reused,
+        "adapter_dir": (Path("..") / home.relative_to(run_dir.parent)).as_posix(),
+    }, indent=2), encoding="utf-8")
+
+
+def _load_trained(cfg: ExperimentConfig, adapter_dir: Path, stats_path: Path,
+                  reused: bool) -> LoadedModel:
     lm = load_student(cfg.model, adapter_dir=adapter_dir)
-    lm.train_stats = json.loads(stats_path.read_text(encoding="utf-8"))
+    lm.train_stats = {**json.loads(stats_path.read_text(encoding="utf-8")),
+                      "reused_adapter": reused}
     return lm

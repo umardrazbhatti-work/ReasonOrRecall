@@ -395,7 +395,10 @@ def fig_scorecard(plt, run: dict, items: list[dict], arm_note: str, path: Path) 
     tr, timing = run["_train"], (run.get("extra") or {}).get("timing_s") or {}
     n = run.get("n_examples") or len(items)
     n_ok = sum(bool(i["correct"]) for i in items)
-    tiles = [("Exact match", _pct(run.get("exact_match")), f"{n_ok} of {n} test questions")]
+    strict = run.get("exact_match_strict")
+    tiles = [("Exact match (primary rule)", _pct(run.get("exact_match")),
+              f"{n_ok} of {n} test questions" + (f"; strict {_pct(strict)}"
+                                                 if strict is not None else ""))]
     if tr:
         ev = tr.get("eval_loss_by_epoch") or []
         tiles.append(("Loss", f"{tr.get('train_loss', float('nan')):.2f}"

@@ -55,3 +55,12 @@ def test_unimplemented_decoding_modes_refuse_instead_of_mislabelling():
     with pytest.raises(NotImplementedError, match="self-consistency"):
         sc = ExperimentConfig(arm="A5", model="qwen2.5-3b", self_consistency_k=5)
         generate(model=None, cfg=sc, examples=[])
+
+
+def test_answer_is_percent_reads_the_final_answer():
+    from ror.inference import answer_is_percent
+
+    assert answer_is_percent("-14.2%")
+    assert answer_is_percent("The margin grew.\nAnswer: 14.5 %")
+    assert not answer_is_percent("0.145")
+    assert not answer_is_percent("Growth was 14%.\nAnswer: 0.14")

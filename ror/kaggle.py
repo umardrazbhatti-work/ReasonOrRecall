@@ -121,7 +121,8 @@ def latest_results(runs_dir: Path, n: int = 5) -> list[str]:
     lines = []
     for r in load_results(runs_dir)[-n:]:
         train = (r.get("extra") or {}).get("train") or {}
-        parts = [f"{r['name']}: EM={_pct(r.get('exact_match'))} on {r.get('n_examples')} items",
+        parts = [f"{r['name']}: EM={_pct(r.get('exact_match'))} "
+                 f"(strict {_pct(r.get('exact_match_strict'))}) on {r.get('n_examples')} items",
                  f"wall {(r.get('wall_time_s') or 0) / 60:.1f} min"]
         if train:
             parts.append(f"trained on {train.get('n_train')} items, "
